@@ -45,7 +45,7 @@ import (
 	"time"
 
 	"github.com/prometheus/prometheus/prompb"
-	"github.com/<org>/<repo>/ruler"
+	"github.com/baselinehq/ruler"
 )
 
 type logWriter struct{}
