@@ -2,6 +2,7 @@ package ruler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
@@ -90,10 +91,10 @@ func (r *replayRunner) Run(ctx context.Context) {
 	span, _, err := resolveSpan(r.cfg, r.groupCfg, r.minDepth, 0)
 	if err != nil {
 		r.logger.Errorf("replay: resolveSpan rule=%q: %v", r.rule.Record, err)
-		switch err {
-		case ErrReplayNoSpan:
+		switch {
+		case errors.Is(err, ErrReplayNoSpan):
 			r.coord.setOutcome(r.rule.ID, OutcomeSkippedNoSpan)
-		case ErrReplayRetentionBelowMinDepth:
+		case errors.Is(err, ErrReplayRetentionBelowMinDepth):
 			r.coord.setOutcome(r.rule.ID, OutcomeSkippedRetention)
 		default:
 			r.coord.setOutcome(r.rule.ID, OutcomeFailed)
