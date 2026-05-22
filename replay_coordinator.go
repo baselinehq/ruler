@@ -120,8 +120,3 @@ func (c *replayCoordinator) updateProgress(ruleID uint64, chunkEnd int64) {
 		c.progress[ruleID] = chunkEnd
 	}
 }
-
-// Temporary stub. Replaced in Phase G with full implementation.
-type replayMetrics struct{}
-
-func newReplayMetrics(_ any) *replayMetrics { return nil }

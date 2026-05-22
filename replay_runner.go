@@ -87,6 +87,11 @@ func (r *replayRunner) Run(ctx context.Context) {
 		}
 	}()
 
+	if r.coord.metrics != nil {
+		r.coord.metrics.Active.Inc()
+		defer r.coord.metrics.Active.Dec()
+	}
+
 	now := time.Now()
 	span, _, err := resolveSpan(r.cfg, r.groupCfg, r.minDepth, 0)
 	if err != nil {
@@ -137,7 +142,15 @@ func (r *replayRunner) Run(ctx context.Context) {
 		go func(c timeRange) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if err := r.execChunk(ctx, c); err != nil {
+			err := r.execChunk(ctx, c)
+			if r.coord.metrics != nil {
+				outcome := "ok"
+				if err != nil {
+					outcome = "failed"
+				}
+				r.coord.metrics.ChunksTotal.WithLabelValues(r.rule.Record, outcome).Inc()
+			}
+			if err != nil {
 				r.logger.Errorf("replay: chunk rule=%q [%v,%v]: %v", r.rule.Record, c.Start, c.End, err)
 				errMu.Lock()
 				errCount++
@@ -155,6 +168,11 @@ func (r *replayRunner) Run(ctx context.Context) {
 		r.coord.setOutcome(r.rule.ID, OutcomeFailed)
 	}
 	r.logger.Infof("replay: rule=%q done outcome=%s chunks=%d errors=%d", r.rule.Record, r.coord.outcome(r.rule.ID), len(chunks), errCount)
+
+	if r.coord.metrics != nil {
+		r.coord.metrics.RulesTotal.WithLabelValues(r.coord.outcome(r.rule.ID).String()).Inc()
+		r.coord.metrics.SpanResolved.WithLabelValues(r.rule.Record).Set(span.Seconds())
+	}
 }
 
 // emitProgressMarker writes a single sample to ProgressMetric series.
