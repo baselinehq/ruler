@@ -3,6 +3,7 @@ package ruler
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/prometheus/prometheus/prompb"
@@ -73,6 +74,31 @@ func (r *replayRunner) validateSources(inv *metricInventory, records map[string]
 		return fmt.Errorf("source metrics not found in TSDB: %v", missing)
 	}
 	return nil
+}
+
+// readProgressMarker returns the latest watermark for this rule, or zero time
+// if no marker exists or feature disabled.
+func (r *replayRunner) readProgressMarker(ctx context.Context) (time.Time, error) {
+	if r.cfg.ProgressMetric == "" {
+		return time.Time{}, nil
+	}
+	expr := r.cfg.ProgressMetric + `{rule_id="` + strconv.FormatUint(r.rule.ID, 10) + `"}`
+	res, err := r.q.Query(ctx, expr, time.Now())
+	if err != nil {
+		return time.Time{}, err
+	}
+	var maxV float64
+	for _, m := range res.Data {
+		for _, v := range m.Values {
+			if v > maxV {
+				maxV = v
+			}
+		}
+	}
+	if maxV == 0 {
+		return time.Time{}, nil
+	}
+	return time.Unix(int64(maxV), 0), nil
 }
 
 // waitUpstreams blocks until each upstream's done channel closes (or ctx done).

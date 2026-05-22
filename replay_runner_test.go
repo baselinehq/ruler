@@ -127,4 +127,35 @@ func TestWaitUpstreams_CtxCancel(t *testing.T) {
 	}
 }
 
+func TestReadProgressMarker_DisabledReturnsZero(t *testing.T) {
+	r := &replayRunner{cfg: ReplayConfig{ProgressMetric: ""}}
+	got, err := r.readProgressMarker(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.IsZero() {
+		t.Errorf("got %v, want zero", got)
+	}
+}
+
+func TestReadProgressMarker_ReturnsWatermark(t *testing.T) {
+	wantSec := int64(1700000000)
+	r := &replayRunner{
+		cfg:  ReplayConfig{ProgressMetric: "ruler_replay_progress"},
+		rule: Rule{ID: 99, Record: "rec"},
+		q: &testQuerier{result: Result{Data: []Metric{{
+			Labels:     []prompb.Label{{Name: "rule_id", Value: "99"}},
+			Timestamps: []int64{wantSec * 1000},
+			Values:     []float64{float64(wantSec)},
+		}}}},
+	}
+	got, err := r.readProgressMarker(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Unix() != wantSec {
+		t.Errorf("watermark = %v, want unix=%d", got, wantSec)
+	}
+}
+
 var _ = time.Now
