@@ -325,3 +325,20 @@ func BenchmarkReplay_FindGaps(b *testing.B) {
 		_ = findGaps(probe, 5*time.Minute, start, now, step)
 	}
 }
+
+func BenchmarkReplay_TopoSort(b *testing.B) {
+	rules := make([]Rule, 0, 100)
+	for i := 0; i < 100; i++ {
+		expr := "up"
+		if i > 0 {
+			expr = "rec_" + strconv.Itoa(i-1)
+		}
+		rules = append(rules, mkRule("rec_"+strconv.Itoa(i), expr))
+	}
+	cfg := mkCfg(rules...)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = buildDepGraph(cfg)
+	}
+}
