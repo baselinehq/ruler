@@ -43,8 +43,22 @@ groups:
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if !contains(out, []byte("span: 30d")) {
-		t.Errorf("round trip lost span: %s", out)
+	round, err := ParseConfig(out)
+	if err != nil {
+		t.Fatalf("reparse: %v", err)
+	}
+	if len(round.Groups) != 1 || round.Groups[0].Replay == nil {
+		t.Fatalf("replay block lost on round trip")
+	}
+	rr := round.Groups[0].Replay
+	if rr.Enabled == nil || *rr.Enabled != true {
+		t.Errorf("round-trip enabled = %v, want true", rr.Enabled)
+	}
+	if rr.Span == nil || time.Duration(*rr.Span) != 30*24*time.Hour {
+		t.Errorf("round-trip span = %v, want 30d", rr.Span)
+	}
+	if rr.MaxLookback == nil || time.Duration(*rr.MaxLookback) != 90*24*time.Hour {
+		t.Errorf("round-trip max_lookback = %v, want 90d", rr.MaxLookback)
 	}
 }
 
@@ -70,23 +84,4 @@ func TestGroupReplayConfig_NilSafe(t *testing.T) {
 	if err := g.Validate(); err != nil {
 		t.Errorf("nil should not error: %v", err)
 	}
-}
-
-func contains(haystack, needle []byte) bool {
-	if len(needle) == 0 {
-		return true
-	}
-	for i := 0; i+len(needle) <= len(haystack); i++ {
-		match := true
-		for j := range needle {
-			if haystack[i+j] != needle[j] {
-				match = false
-				break
-			}
-		}
-		if match {
-			return true
-		}
-	}
-	return false
 }
