@@ -206,6 +206,7 @@ func (r *replayRunner) emitProgressMarker(ctx context.Context, chunkEnd time.Tim
 
 // execChunk runs one chunk: QueryRange → toTimeSeries → Write, with retry.
 func (r *replayRunner) execChunk(ctx context.Context, chunk timeRange) error {
+	start := time.Now()
 	chunkCtx, cancel := context.WithTimeout(ctx, r.cfg.ChunkTimeout)
 	defer cancel()
 
@@ -221,6 +222,9 @@ func (r *replayRunner) execChunk(ctx context.Context, chunk timeRange) error {
 
 	tss := r.toTimeSeriesMatrix(res)
 	if len(tss) == 0 {
+		if r.coord != nil && r.coord.metrics != nil {
+			r.coord.metrics.ChunkDuration.WithLabelValues(r.rule.Record).Observe(time.Since(start).Seconds())
+		}
 		return nil
 	}
 
@@ -230,6 +234,14 @@ func (r *replayRunner) execChunk(ctx context.Context, chunk timeRange) error {
 		return fmt.Errorf("write chunk [%v,%v]: %w", chunk.Start, chunk.End, err)
 	}
 
+	if r.coord != nil && r.coord.metrics != nil {
+		r.coord.metrics.ChunkDuration.WithLabelValues(r.rule.Record).Observe(time.Since(start).Seconds())
+		var sampleCount int
+		for _, ts := range tss {
+			sampleCount += len(ts.Samples)
+		}
+		r.coord.metrics.SamplesWritten.WithLabelValues(r.rule.Record).Add(float64(sampleCount))
+	}
 	if r.coord != nil {
 		r.coord.updateProgress(r.rule.ID, chunk.End.UnixMilli())
 	}
@@ -266,7 +278,13 @@ func (r *replayRunner) probeCoverage(ctx context.Context, start, end time.Time, 
 		return nil, err
 	}
 	merge := r.cfg.GapMergeWindow
-	return findGaps(probe, merge, start, end, step), nil
+	gaps := findGaps(probe, merge, start, end, step)
+	if r.coord != nil && r.coord.metrics != nil {
+		for _, g := range gaps {
+			r.coord.metrics.GapsDetected.WithLabelValues(r.rule.Record).Observe(g.End.Sub(g.Start).Seconds())
+		}
+	}
+	return gaps, nil
 }
 
 // readProgressMarker returns the latest watermark for this rule, or zero time
@@ -298,6 +316,12 @@ func (r *replayRunner) readProgressMarker(ctx context.Context) (time.Time, error
 // If any upstream's outcome is not a success, returns a cascade-skip error
 // naming the failing upstream.
 func (r *replayRunner) waitUpstreams(ctx context.Context, upstreamIDs []uint64) error {
+	start := time.Now()
+	defer func() {
+		if r.coord != nil && r.coord.metrics != nil {
+			r.coord.metrics.UpstreamWaitSecs.WithLabelValues(r.rule.Record).Observe(time.Since(start).Seconds())
+		}
+	}()
 	for i, ch := range r.upstreams {
 		select {
 		case <-ch:
