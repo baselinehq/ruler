@@ -89,6 +89,42 @@ func TestValidateSources_AllowsKnownExternal(t *testing.T) {
 	}
 }
 
-// Touch context import (used in later runner tests)
-var _ = context.Background
+func TestWaitUpstreams_AllSuccessReturnsNil(t *testing.T) {
+	up1 := make(chan struct{})
+	close(up1)
+	up2 := make(chan struct{})
+	close(up2)
+	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t})
+	defer c.Stop()
+	c.setOutcome(10, OutcomeCompleted)
+	c.setOutcome(11, OutcomeCompleted)
+	r := &replayRunner{coord: c, upstreams: []chan struct{}{up1, up2}}
+	if err := r.waitUpstreams(context.Background(), []uint64{10, 11}); err != nil {
+		t.Errorf("err = %v, want nil", err)
+	}
+}
+
+func TestWaitUpstreams_FailedUpstreamCascades(t *testing.T) {
+	up := make(chan struct{})
+	close(up)
+	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t})
+	defer c.Stop()
+	c.setOutcome(20, OutcomeFailed)
+	r := &replayRunner{coord: c, upstreams: []chan struct{}{up}}
+	err := r.waitUpstreams(context.Background(), []uint64{20})
+	if err == nil {
+		t.Fatal("want error on failed upstream")
+	}
+}
+
+func TestWaitUpstreams_CtxCancel(t *testing.T) {
+	up := make(chan struct{}) // never closes
+	r := &replayRunner{upstreams: []chan struct{}{up}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := r.waitUpstreams(ctx, []uint64{30}); err == nil {
+		t.Error("want ctx error")
+	}
+}
+
 var _ = time.Now

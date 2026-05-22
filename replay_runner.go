@@ -75,5 +75,21 @@ func (r *replayRunner) validateSources(inv *metricInventory, records map[string]
 	return nil
 }
 
-// Touch context import - used by later phases of the runner.
-var _ = context.Background
+// waitUpstreams blocks until each upstream's done channel closes (or ctx done).
+// If any upstream's outcome is not a success, returns a cascade-skip error
+// naming the failing upstream.
+func (r *replayRunner) waitUpstreams(ctx context.Context, upstreamIDs []uint64) error {
+	for i, ch := range r.upstreams {
+		select {
+		case <-ch:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		upID := upstreamIDs[i]
+		outcome := r.coord.outcome(upID)
+		if !outcome.IsSuccess() {
+			return fmt.Errorf("upstream rule_id=%d outcome=%s; cascading skip", upID, outcome)
+		}
+	}
+	return nil
+}
