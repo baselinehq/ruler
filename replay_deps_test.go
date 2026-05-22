@@ -3,6 +3,9 @@ package ruler
 import (
 	"sort"
 	"testing"
+	"time"
+
+	"github.com/prometheus/common/model"
 )
 
 func TestExtractSelectors_VectorSelector(t *testing.T) {
@@ -69,6 +72,95 @@ func TestExtractSelectors_RejectsParseError(t *testing.T) {
 	if _, err := extractSelectors("not a + valid("); err == nil {
 		t.Fatal("want parse error")
 	}
+}
+
+func mkRule(record, expr string) Rule {
+	r := Rule{Record: record, Expr: expr}
+	r.ID = HashRule(r)
+	return r
+}
+
+func mkCfg(rules ...Rule) Config {
+	interval := model.Duration(time.Minute)
+	return Config{Groups: []Group{{Name: "g", Type: "prometheus", Interval: &interval, Rules: rules}}}
+}
+
+func TestBuildDepGraph_LinearChain(t *testing.T) {
+	a := mkRule("A", "up")
+	b := mkRule("B", "A")
+	c := mkRule("C", "B")
+	g, err := buildDepGraph(mkCfg(a, b, c))
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if len(g.cycle) != 0 {
+		t.Fatalf("cycle = %v, want empty", g.cycle)
+	}
+	posA, posB, posC := indexOf(g.order, a.ID), indexOf(g.order, b.ID), indexOf(g.order, c.ID)
+	if !(posA < posB && posB < posC) {
+		t.Errorf("order = %v, want A<B<C", g.order)
+	}
+}
+
+func TestBuildDepGraph_ExternalRefsAreRoots(t *testing.T) {
+	a := mkRule("A", `rate(external_metric[5m])`)
+	g, err := buildDepGraph(mkCfg(a))
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	if len(g.nodes[a.ID].upstreams) != 0 {
+		t.Errorf("upstreams = %v, want []", g.nodes[a.ID].upstreams)
+	}
+}
+
+func TestBuildDepGraph_Cycle(t *testing.T) {
+	a := mkRule("A", "B")
+	b := mkRule("B", "A")
+	g, err := buildDepGraph(mkCfg(a, b))
+	if err != ErrReplayCycle {
+		t.Fatalf("err = %v, want ErrReplayCycle", err)
+	}
+	if len(g.cycle) != 2 {
+		t.Errorf("cycle = %v, want 2 members", g.cycle)
+	}
+}
+
+func TestBuildDepGraph_SelfReference(t *testing.T) {
+	a := mkRule("A", "A")
+	g, err := buildDepGraph(mkCfg(a))
+	if err != ErrReplayCycle {
+		t.Fatalf("err = %v, want ErrReplayCycle", err)
+	}
+	if len(g.cycle) != 1 || g.cycle[0] != a.ID {
+		t.Errorf("cycle = %v, want [A]", g.cycle)
+	}
+}
+
+func TestBuildDepGraph_CrossGroup(t *testing.T) {
+	interval := model.Duration(time.Minute)
+	a := mkRule("A", "up")
+	b := mkRule("B", "A")
+	cfg := Config{Groups: []Group{
+		{Name: "g1", Type: "prometheus", Interval: &interval, Rules: []Rule{a}},
+		{Name: "g2", Type: "prometheus", Interval: &interval, Rules: []Rule{b}},
+	}}
+	g, err := buildDepGraph(cfg)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	ups := g.nodes[b.ID].upstreams
+	if len(ups) != 1 || ups[0] != a.ID {
+		t.Errorf("B upstreams = %v, want [A]", ups)
+	}
+}
+
+func indexOf(s []uint64, target uint64) int {
+	for i, v := range s {
+		if v == target {
+			return i
+		}
+	}
+	return -1
 }
 
 func equalSorted(got, want []string) bool {
