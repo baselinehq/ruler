@@ -626,3 +626,50 @@ groups:
 		t.Errorf("writes = %d, want 0", len(wr.writes))
 	}
 }
+
+func TestReplayIntegration_InventoryFetchFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+	}))
+	defer srv.Close()
+	client, _ := NewHTTPClient(HTTPConfig{URL: srv.URL, Timeout: time.Second})
+
+	q := &testRangeQuerier{}
+	wr := &testCapturingWriter{}
+
+	cfg := mustParseConfigBytes(t, []byte(`
+groups:
+  - name: g
+    interval: 30m
+    replay:
+      enabled: true
+      span: 1h
+    rules:
+      - record: out_metric
+        expr: rate(foo[5m])
+`))
+	mgr, err := NewManager(ManagerConfig{
+		QuerierBuilder: q, Writer: wr, Context: context.Background(),
+		EvaluationInterval: time.Hour, Logger: &testLogger{t: t},
+		Replay: &ReplayConfig{
+			Enabled: true, DefaultSpan: time.Hour, BatchInterval: 30 * time.Minute,
+			ChunkTimeout: time.Second, Concurrency: 1, RulesConcurrency: 1,
+			ProbeOutput: false,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.replay.httpClient = client
+	defer mgr.Stop()
+	if err := mgr.Apply(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(1 * time.Second)
+
+	ruleID := cfg.Groups[0].Rules[0].ID
+	if got := mgr.replay.outcome(ruleID); got != OutcomePending {
+		t.Errorf("outcome = %v, want pending (runner never spawned due to inventory failure)", got)
+	}
+}
