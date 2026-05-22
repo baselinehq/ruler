@@ -570,3 +570,7 @@ groups:
 		t.Errorf("outcome = %v, want failed", got)
 	}
 }
+
+func TestReplayIntegration_SourceRetentionClamp(t *testing.T) {
+	t.Skip("source retention detection not yet wired into Runner.Run (deferred to follow-up)")
+}
