@@ -66,3 +66,51 @@ func fetchInventory(ctx context.Context, c *HTTPClient) (*metricInventory, error
 	}
 	return &metricInventory{knownNames: known, fetchedAt: time.Now()}, nil
 }
+
+// probeSourceRetention performs a halving binary search to find the rough
+// retention boundary for sourceMetric. It queries instant `count(metric @ ts)`
+// at increasingly-deep timestamps until it stops returning data.
+// Returns the duration of available retention (now - earliestDataTime).
+// Cheap by design (~log2(span/hour) queries); precision is roughly 1 day.
+func probeSourceRetention(ctx context.Context, q Querier, sourceMetric string, maxProbe time.Duration, now time.Time) (time.Duration, error) {
+	expr := fmt.Sprintf("count(%s)", sourceMetric)
+	probeAt := func(d time.Duration) (bool, error) {
+		res, err := q.Query(ctx, expr, now.Add(-d))
+		if err != nil {
+			return false, err
+		}
+		if len(res.Data) == 0 {
+			return false, nil
+		}
+		for _, m := range res.Data {
+			for _, v := range m.Values {
+				if v > 0 {
+					return true, nil
+				}
+			}
+		}
+		return false, nil
+	}
+
+	// Establish an upper bound: any data within last 5m? If not, no retention.
+	if ok, err := probeAt(5 * time.Minute); err != nil || !ok {
+		return 0, err
+	}
+
+	// Halving search between [0, maxProbe].
+	low := time.Duration(0)
+	high := maxProbe
+	for high-low > 24*time.Hour {
+		mid := low + (high-low)/2
+		ok, err := probeAt(mid)
+		if err != nil {
+			return 0, err
+		}
+		if ok {
+			low = mid
+		} else {
+			high = mid
+		}
+	}
+	return low, nil
+}
