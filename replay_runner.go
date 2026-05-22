@@ -76,6 +76,38 @@ func (r *replayRunner) validateSources(inv *metricInventory, records map[string]
 	return nil
 }
 
+// execChunk runs one chunk: QueryRange → toTimeSeries → Write, with retry.
+func (r *replayRunner) execChunk(ctx context.Context, chunk timeRange) error {
+	chunkCtx, cancel := context.WithTimeout(ctx, r.cfg.ChunkTimeout)
+	defer cancel()
+
+	var res Result
+	err := retryChunk(chunkCtx, defaultRetryConfig(), func() error {
+		var qErr error
+		res, qErr = r.q.QueryRange(chunkCtx, r.rule.Expr, chunk.Start, chunk.End)
+		return qErr
+	})
+	if err != nil {
+		return fmt.Errorf("query chunk [%v,%v]: %w", chunk.Start, chunk.End, err)
+	}
+
+	tss := r.toTimeSeriesMatrix(res)
+	if len(tss) == 0 {
+		return nil
+	}
+
+	if err := retryChunk(chunkCtx, defaultRetryConfig(), func() error {
+		return r.writer.Write(chunkCtx, tss)
+	}); err != nil {
+		return fmt.Errorf("write chunk [%v,%v]: %w", chunk.Start, chunk.End, err)
+	}
+
+	if r.coord != nil {
+		r.coord.updateProgress(r.rule.ID, chunk.End.UnixMilli())
+	}
+	return nil
+}
+
 // planChunks splits gaps into BatchInterval-sized sub-ranges.
 func planChunks(gaps []timeRange, batchInterval time.Duration) []timeRange {
 	var out []timeRange

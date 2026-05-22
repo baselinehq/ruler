@@ -232,4 +232,43 @@ func TestPlanChunks_MultipleGaps(t *testing.T) {
 	}
 }
 
+func TestExecChunk_WritesResultViaWriter(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	wr := &testCapturingWriter{}
+	q := &testQuerier{result: Result{Data: []Metric{{
+		Labels:     []prompb.Label{{Name: "k", Value: "v"}},
+		Timestamps: []int64{now.UnixMilli()},
+		Values:     []float64{42},
+	}}}}
+	r := &replayRunner{
+		cfg:    ReplayConfig{ChunkTimeout: time.Second, Concurrency: 1},
+		rule:   Rule{Record: "out"},
+		q:      q,
+		writer: wr,
+	}
+	chunk := timeRange{Start: now.Add(-time.Hour), End: now}
+	if err := r.execChunk(context.Background(), chunk); err != nil {
+		t.Fatal(err)
+	}
+	if len(wr.writes) != 1 || len(wr.writes[0]) != 1 {
+		t.Errorf("writes = %v", wr.writes)
+	}
+}
+
+func TestExecChunk_EmptyResultSkipsWrite(t *testing.T) {
+	wr := &testCapturingWriter{}
+	r := &replayRunner{
+		cfg:    ReplayConfig{ChunkTimeout: time.Second, Concurrency: 1},
+		rule:   Rule{Record: "out"},
+		q:      &testQuerier{result: Result{}},
+		writer: wr,
+	}
+	if err := r.execChunk(context.Background(), timeRange{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(wr.writes) != 0 {
+		t.Errorf("got writes %v, want none", wr.writes)
+	}
+}
+
 var _ = time.Now
