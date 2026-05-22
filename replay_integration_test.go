@@ -674,6 +674,43 @@ groups:
 	}
 }
 
+func TestReplayIntegration_ApplyReturnsImmediately(t *testing.T) {
+	srv := invServer("foo")
+	defer srv.Close()
+	client, _ := NewHTTPClient(HTTPConfig{URL: srv.URL, Timeout: time.Second})
+	q := &testRangeQuerier{
+		probeFunc: func(query string, start, end time.Time) (Result, error) {
+			time.Sleep(500 * time.Millisecond)
+			return Result{}, nil
+		},
+		responses: map[string][]Metric{},
+	}
+	wr := &testCapturingWriter{}
+	cfg := mustParseConfigBytes(t, []byte(`
+groups:
+  - name: g
+    interval: 30m
+    replay: { enabled: true, span: 1h }
+    rules:
+      - record: out
+        expr: rate(foo[5m])
+`))
+	mgr, _ := NewManager(ManagerConfig{
+		QuerierBuilder: q, Writer: wr, Context: context.Background(),
+		EvaluationInterval: time.Hour, Logger: &testLogger{t: t},
+		Replay: &ReplayConfig{Enabled: true, DefaultSpan: time.Hour, BatchInterval: 30 * time.Minute, ChunkTimeout: time.Second, RulesConcurrency: 1, Concurrency: 1, ProbeOutput: true},
+	})
+	mgr.replay.httpClient = client
+	defer mgr.Stop()
+	start := time.Now()
+	if err := mgr.Apply(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if dur := time.Since(start); dur > 100*time.Millisecond {
+		t.Errorf("Apply took %v, want <100ms", dur)
+	}
+}
+
 func TestReplayIntegration_GroupReplayDisabled(t *testing.T) {
 	srv := invServer("foo")
 	defer srv.Close()
