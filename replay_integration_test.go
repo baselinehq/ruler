@@ -574,3 +574,55 @@ groups:
 func TestReplayIntegration_SourceRetentionClamp(t *testing.T) {
 	t.Skip("source retention detection not yet wired into Runner.Run (deferred to follow-up)")
 }
+
+func TestReplayIntegration_EmptyMatcher(t *testing.T) {
+	srv := invServer("foo")
+	defer srv.Close()
+	client, _ := NewHTTPClient(HTTPConfig{URL: srv.URL, Timeout: time.Second})
+
+	q := &testRangeQuerier{
+		probeFunc: func(query string, start, end time.Time) (Result, error) {
+			return Result{}, nil
+		},
+	}
+	wr := &testCapturingWriter{}
+
+	cfg := mustParseConfigBytes(t, []byte(`
+groups:
+  - name: g
+    interval: 30m
+    replay:
+      enabled: true
+      span: 30m
+    rules:
+      - record: out_metric
+        expr: rate(foo[5m])
+`))
+	mgr, err := NewManager(ManagerConfig{
+		QuerierBuilder: q, Writer: wr, Context: context.Background(),
+		EvaluationInterval: time.Hour, Logger: &testLogger{t: t},
+		Replay: &ReplayConfig{
+			Enabled: true, DefaultSpan: 30 * time.Minute, BatchInterval: 30 * time.Minute,
+			ChunkTimeout: time.Second, Concurrency: 1, RulesConcurrency: 1,
+			ProbeOutput: false,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.replay.httpClient = client
+	defer mgr.Stop()
+	if err := mgr.Apply(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	ruleID := cfg.Groups[0].Rules[0].ID
+	waitOutcome(t, mgr.replay, ruleID, 5*time.Second)
+
+	if got := mgr.replay.outcome(ruleID); got != OutcomeCompleted {
+		t.Errorf("outcome = %v, want completed", got)
+	}
+	if len(wr.writes) != 0 {
+		t.Errorf("writes = %d, want 0", len(wr.writes))
+	}
+}
