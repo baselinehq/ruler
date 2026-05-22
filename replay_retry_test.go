@@ -96,6 +96,7 @@ func TestIsRetryable(t *testing.T) {
 		{fmt.Errorf("status=429 body=\"rate limit\""), true},
 		{fmt.Errorf("status=400 body=\"parse error\""), false},
 		{fmt.Errorf("status=404 body=\"not found\""), false},
+		{fmt.Errorf("status=400 body=\"...echoed status=503...\""), false},
 	}
 	for _, tc := range cases {
 		got := isRetryable(tc.err)

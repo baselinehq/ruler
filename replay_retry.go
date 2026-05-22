@@ -82,11 +82,14 @@ func isRetryable(err error) bool {
 	if strings.Contains(lower, "connection reset") || strings.Contains(lower, "connection refused") || strings.Contains(lower, "broken pipe") {
 		return true
 	}
-	if strings.Contains(msg, "status=5") || strings.Contains(msg, "status=429") {
+	if strings.Contains(msg, "status=429") {
 		return true
 	}
 	if strings.Contains(msg, "status=4") {
 		return false
+	}
+	if strings.Contains(msg, "status=5") {
+		return true
 	}
 	return false
 }
