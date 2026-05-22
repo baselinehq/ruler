@@ -145,6 +145,10 @@ func (m *Manager) Apply(cfg Config) error {
 		ng.Start(m.ctx, m.maxStartDelay)
 	}
 
+	if m.replay != nil {
+		go m.replay.OnApply(m.ctx, cfg)
+	}
+
 	return nil
 }
 
