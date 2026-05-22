@@ -88,7 +88,7 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 	}
 
 	if cfg.Replay != nil {
-		coord, err := newReplayCoordinator(ctx, *cfg.Replay, cfg.QuerierBuilder, cfg.Writer, mgr.logger)
+		coord, err := newReplayCoordinator(ctx, *cfg.Replay, cfg.QuerierBuilder, cfg.Writer, mgr.logger, mgr.externalLabels)
 		if err != nil {
 			return nil, fmt.Errorf("replay coordinator: %w", err)
 		}

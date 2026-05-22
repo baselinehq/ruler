@@ -711,6 +711,80 @@ groups:
 	}
 }
 
+func TestReplayIntegration_RuleLabelsPropagate(t *testing.T) {
+	now := time.Now().Truncate(time.Minute)
+	srv := invServer("foo")
+	defer srv.Close()
+	client, _ := NewHTTPClient(HTTPConfig{URL: srv.URL, Timeout: time.Second})
+
+	q := &testRangeQuerier{
+		responses: map[string][]Metric{
+			"rate(foo[5m])": {{
+				Labels:     []prompb.Label{{Name: "instance", Value: "i1"}},
+				Timestamps: makeRangeTimestamps(now.Add(-1*time.Hour), now, 15*time.Minute),
+				Values:     []float64{1, 1, 1, 1, 1},
+			}},
+		},
+	}
+	wr := &testCapturingWriter{}
+
+	cfg := mustParseConfigBytes(t, []byte(`
+groups:
+  - name: g
+    interval: 30m
+    labels:
+      cluster: east
+    replay: { enabled: true, span: 1h }
+    rules:
+      - record: out_metric
+        expr: rate(foo[5m])
+        labels:
+          tier: prod
+`))
+
+	mgr, err := NewManager(ManagerConfig{
+		QuerierBuilder:     q,
+		Writer:             wr,
+		Context:            context.Background(),
+		EvaluationInterval: time.Hour,
+		Logger:             &testLogger{t: t},
+		ExternalLabels:     map[string]string{"region": "us"},
+		Replay: &ReplayConfig{
+			Enabled: true, DefaultSpan: time.Hour, BatchInterval: 30 * time.Minute,
+			ChunkTimeout: time.Second, Concurrency: 1, RulesConcurrency: 2,
+			ProbeOutput: false,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.replay.httpClient = client
+	defer mgr.Stop()
+	if err := mgr.Apply(cfg); err != nil {
+		t.Fatal(err)
+	}
+	ruleID := cfg.Groups[0].Rules[0].ID
+	waitOutcome(t, mgr.replay, ruleID, 5*time.Second)
+
+	if len(wr.writes) == 0 || len(wr.writes[0]) == 0 {
+		t.Fatal("no writes captured")
+	}
+	labels := map[string]string{}
+	for _, l := range wr.writes[0][0].Labels {
+		labels[l.Name] = l.Value
+	}
+	for _, want := range []struct{ k, v string }{
+		{"__name__", "out_metric"},
+		{"tier", "prod"},
+		{"cluster", "east"},
+		{"region", "us"},
+	} {
+		if labels[want.k] != want.v {
+			t.Errorf("label %q = %q, want %q (full: %v)", want.k, labels[want.k], want.v, labels)
+		}
+	}
+}
+
 func TestReplayIntegration_GroupReplayDisabled(t *testing.T) {
 	srv := invServer("foo")
 	defer srv.Close()

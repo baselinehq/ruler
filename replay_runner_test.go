@@ -94,7 +94,7 @@ func TestWaitUpstreams_AllSuccessReturnsNil(t *testing.T) {
 	close(up1)
 	up2 := make(chan struct{})
 	close(up2)
-	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t})
+	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t}, nil)
 	defer c.Stop()
 	c.setOutcome(10, OutcomeCompleted)
 	c.setOutcome(11, OutcomeCompleted)
@@ -107,7 +107,7 @@ func TestWaitUpstreams_AllSuccessReturnsNil(t *testing.T) {
 func TestWaitUpstreams_FailedUpstreamCascades(t *testing.T) {
 	up := make(chan struct{})
 	close(up)
-	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t})
+	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t}, nil)
 	defer c.Stop()
 	c.setOutcome(20, OutcomeFailed)
 	r := &replayRunner{coord: c, upstreams: []chan struct{}{up}}
@@ -327,7 +327,7 @@ func TestRunnerRun_HappyPath(t *testing.T) {
 		ChunkTimeout:  time.Second,
 		Concurrency:   1,
 		ProbeOutput:   false,
-	}, q, wr, &testLogger{t: t})
+	}, q, wr, &testLogger{t: t}, nil)
 	defer c.Stop()
 	r := &replayRunner{
 		rule:   Rule{Record: "out", Expr: "rate(foo[5m])", ID: 1},

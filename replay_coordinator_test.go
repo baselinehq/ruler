@@ -12,7 +12,7 @@ import (
 )
 
 func TestCoordinator_DisabledReturnsNil(t *testing.T) {
-	c, err := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: false}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t})
+	c, err := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: false}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +22,7 @@ func TestCoordinator_DisabledReturnsNil(t *testing.T) {
 }
 
 func TestCoordinator_MarkProbedDedup(t *testing.T) {
-	c, err := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t})
+	c, err := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestCoordinator_MarkProbedDedup(t *testing.T) {
 }
 
 func TestCoordinator_SetOutcomeClosesDoneChan(t *testing.T) {
-	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t})
+	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t}, nil)
 	defer c.Stop()
 	ch := c.doneCh(7)
 	c.setOutcome(7, OutcomeCompleted)
@@ -51,7 +51,7 @@ func TestCoordinator_SetOutcomeClosesDoneChan(t *testing.T) {
 }
 
 func TestCoordinator_SetOutcomeBeforeDoneCh_StillCascades(t *testing.T) {
-	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: time.Hour}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t})
+	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: time.Hour}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t}, nil)
 	defer c.Stop()
 	c.setOutcome(42, OutcomeSkippedDisabled)
 	ch := c.doneCh(42)
@@ -63,7 +63,7 @@ func TestCoordinator_SetOutcomeBeforeDoneCh_StillCascades(t *testing.T) {
 }
 
 func TestCoordinator_UpdateProgressMonotonic(t *testing.T) {
-	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t})
+	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t}, nil)
 	defer c.Stop()
 	c.updateProgress(1, 100)
 	c.updateProgress(1, 50) // older, should be ignored
@@ -90,7 +90,7 @@ func TestCoordinatorOnApply_SpawnsRunnerForNewRule(t *testing.T) {
 	c, err := newReplayCoordinator(context.Background(), ReplayConfig{
 		Enabled: true, DefaultSpan: 1 * time.Hour, BatchInterval: 30 * time.Minute,
 		ChunkTimeout: time.Second, Concurrency: 1, RulesConcurrency: 2,
-	}, q, wr, &testLogger{t: t})
+	}, q, wr, &testLogger{t: t}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

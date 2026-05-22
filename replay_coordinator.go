@@ -9,10 +9,11 @@ import (
 // replayCoordinator owns the lifecycle of replay runners and maintains
 // per-process state (probed set, outcomes, in-memory progress).
 type replayCoordinator struct {
-	cfg    ReplayConfig
-	qb     QuerierBuilder
-	writer SeriesWriter
-	logger Logger
+	cfg            ReplayConfig
+	qb             QuerierBuilder
+	writer         SeriesWriter
+	logger         Logger
+	externalLabels map[string]string
 
 	httpClient *HTTPClient
 
@@ -33,7 +34,7 @@ type replayCoordinator struct {
 
 // newReplayCoordinator validates cfg, applies defaults, and constructs the coordinator.
 // If cfg.Enabled is false this returns nil to signal "no-op".
-func newReplayCoordinator(parent context.Context, cfg ReplayConfig, qb QuerierBuilder, writer SeriesWriter, logger Logger) (*replayCoordinator, error) {
+func newReplayCoordinator(parent context.Context, cfg ReplayConfig, qb QuerierBuilder, writer SeriesWriter, logger Logger, externalLabels map[string]string) (*replayCoordinator, error) {
 	if !cfg.Enabled {
 		return nil, nil
 	}
@@ -44,19 +45,20 @@ func newReplayCoordinator(parent context.Context, cfg ReplayConfig, qb QuerierBu
 	httpClient, _ := qb.(*HTTPClient) // optional; nil if caller uses a different builder
 	ctx, cancel := context.WithCancel(parent)
 	return &replayCoordinator{
-		cfg:        cfg,
-		qb:         qb,
-		writer:     writer,
-		logger:     ensureLogger(logger),
-		httpClient: httpClient,
-		probed:     map[uint64]struct{}{},
-		outcomes:   map[uint64]ReplayOutcome{},
-		doneChans:  map[uint64]chan struct{}{},
-		progress:   map[uint64]int64{},
-		rulesSem:   make(chan struct{}, cfg.RulesConcurrency),
-		ctx:        ctx,
-		cancel:     cancel,
-		metrics:    newReplayMetrics(cfg.Registerer),
+		cfg:            cfg,
+		qb:             qb,
+		writer:         writer,
+		logger:         ensureLogger(logger),
+		externalLabels: externalLabels,
+		httpClient:     httpClient,
+		probed:         map[uint64]struct{}{},
+		outcomes:       map[uint64]ReplayOutcome{},
+		doneChans:      map[uint64]chan struct{}{},
+		progress:       map[uint64]int64{},
+		rulesSem:       make(chan struct{}, cfg.RulesConcurrency),
+		ctx:            ctx,
+		cancel:         cancel,
+		metrics:        newReplayMetrics(cfg.Registerer),
 	}, nil
 }
 
@@ -205,6 +207,9 @@ func (c *replayCoordinator) OnApply(_ context.Context, cfg Config) {
 			upstreams: upChs,
 			done:      c.doneCh(id),
 		}
+		labels := mergeLabelSets(c.logger, grp.Name, rule.Name(), c.externalLabels, grp.Labels)
+		labels = mergeLabelSets(c.logger, grp.Name, rule.Name(), labels, rule.Labels)
+		runner.ruleLabels = prepareRuleLabels(labels)
 
 		if c.inv != nil {
 			if err := runner.validateSources(c.inv, records); err != nil {
