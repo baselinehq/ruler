@@ -521,3 +521,52 @@ groups:
 		t.Errorf("attempts = %d, want > 2 (expected at least one retry observed)", got)
 	}
 }
+
+func TestReplayIntegration_ChunkRetryExhausted(t *testing.T) {
+	srv := invServer("foo")
+	defer srv.Close()
+	client, _ := NewHTTPClient(HTTPConfig{URL: srv.URL, Timeout: 5 * time.Second})
+
+	q := &testRangeQuerier{
+		probeFunc: func(query string, start, end time.Time) (Result, error) {
+			return Result{}, errors.New(`status=503 body="upstream"`)
+		},
+	}
+	wr := &testCapturingWriter{}
+
+	cfg := mustParseConfigBytes(t, []byte(`
+groups:
+  - name: g
+    interval: 30m
+    replay:
+      enabled: true
+      span: 30m
+    rules:
+      - record: out_metric
+        expr: rate(foo[5m])
+`))
+	mgr, err := NewManager(ManagerConfig{
+		QuerierBuilder: q, Writer: wr, Context: context.Background(),
+		EvaluationInterval: time.Hour, Logger: &testLogger{t: t},
+		Replay: &ReplayConfig{
+			Enabled: true, DefaultSpan: 30 * time.Minute, BatchInterval: 30 * time.Minute,
+			ChunkTimeout: 10 * time.Second, Concurrency: 1, RulesConcurrency: 1,
+			ProbeOutput: false,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.replay.httpClient = client
+	defer mgr.Stop()
+	if err := mgr.Apply(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	ruleID := cfg.Groups[0].Rules[0].ID
+	waitOutcome(t, mgr.replay, ruleID, 15*time.Second)
+
+	if got := mgr.replay.outcome(ruleID); got != OutcomeFailed {
+		t.Errorf("outcome = %v, want failed", got)
+	}
+}
