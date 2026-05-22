@@ -231,8 +231,12 @@ func (c *replayCoordinator) OnApply(_ context.Context, cfg Config) {
 			}
 		}
 
+		select {
+		case c.rulesSem <- struct{}{}:
+		case <-c.ctx.Done():
+			return
+		}
 		c.wg.Add(1)
-		c.rulesSem <- struct{}{}
 		go func(rnr *replayRunner, upIDs []uint64) {
 			defer c.wg.Done()
 			defer func() { <-c.rulesSem }()
