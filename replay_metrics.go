@@ -13,7 +13,6 @@ type replayMetrics struct {
 	SpanResolved     *prometheus.GaugeVec
 	UpstreamWaitSecs *prometheus.HistogramVec
 	Active           prometheus.Gauge
-	InventoryAge     prometheus.Gauge
 }
 
 func newReplayMetrics(reg prometheus.Registerer) *replayMetrics {
@@ -53,13 +52,9 @@ func newReplayMetrics(reg prometheus.Registerer) *replayMetrics {
 			Name: "ruler_replay_active_runners",
 			Help: "Number of replay runners currently active.",
 		}),
-		InventoryAge: prometheus.NewGauge(prometheus.GaugeOpts{
-			Name: "ruler_replay_inventory_age_seconds",
-			Help: "Seconds since last metric inventory fetch.",
-		}),
 	}
 	if reg != nil {
-		reg.MustRegister(m.RulesTotal, m.ChunksTotal, m.ChunkDuration, m.SamplesWritten, m.GapsDetected, m.SpanResolved, m.UpstreamWaitSecs, m.Active, m.InventoryAge)
+		reg.MustRegister(m.RulesTotal, m.ChunksTotal, m.ChunkDuration, m.SamplesWritten, m.GapsDetected, m.SpanResolved, m.UpstreamWaitSecs, m.Active)
 	}
 	return m
 }

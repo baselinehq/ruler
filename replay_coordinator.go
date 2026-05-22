@@ -155,9 +155,6 @@ func (c *replayCoordinator) OnApply(_ context.Context, cfg Config) {
 			return
 		}
 		c.inv = inv
-		if c.metrics != nil {
-			c.metrics.InventoryAge.Set(0)
-		}
 	}
 
 	// 2. Build dep graph + handle cycles.
