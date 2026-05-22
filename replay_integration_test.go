@@ -380,3 +380,77 @@ groups:
 		t.Errorf("outcome = %v, want completed", got)
 	}
 }
+
+func TestReplayIntegration_CancellationMidReplay(t *testing.T) {
+	srv := invServer("foo")
+	defer srv.Close()
+	client, _ := NewHTTPClient(HTTPConfig{URL: srv.URL, Timeout: 5 * time.Second})
+
+	var chunkCount int32
+	q := &testRangeQuerier{
+		probeFunc: func(query string, start, end time.Time) (Result, error) {
+			atomic.AddInt32(&chunkCount, 1)
+			time.Sleep(50 * time.Millisecond)
+			ts := makeRangeTimestamps(start, end, 15*time.Minute)
+			vals := make([]float64, len(ts))
+			for i := range vals {
+				vals[i] = 1
+			}
+			return Result{Data: []Metric{{
+				Labels:     []prompb.Label{{Name: "k", Value: "v"}},
+				Timestamps: ts,
+				Values:     vals,
+			}}}, nil
+		},
+	}
+	wr := &testCapturingWriter{}
+
+	cfg := mustParseConfigBytes(t, []byte(`
+groups:
+  - name: g
+    interval: 1h
+    replay:
+      enabled: true
+      span: 4h
+    rules:
+      - record: out_metric
+        expr: rate(foo[5m])
+`))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr, err := NewManager(ManagerConfig{
+		QuerierBuilder: q, Writer: wr, Context: ctx,
+		EvaluationInterval: time.Hour, Logger: &testLogger{t: t},
+		Replay: &ReplayConfig{
+			Enabled: true, DefaultSpan: 4 * time.Hour, BatchInterval: 30 * time.Minute,
+			ChunkTimeout: 5 * time.Second, Concurrency: 1, RulesConcurrency: 1,
+			ProbeOutput: false,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.replay.httpClient = client
+	defer mgr.Stop()
+	if err := mgr.Apply(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	time.AfterFunc(100*time.Millisecond, cancel)
+
+	ruleID := cfg.Groups[0].Rules[0].ID
+	waitOutcome(t, mgr.replay, ruleID, 5*time.Second)
+
+	got := mgr.replay.outcome(ruleID)
+	if got != OutcomeCancelled && got != OutcomeFailed {
+		t.Errorf("outcome = %v, want cancelled or failed", got)
+	}
+	final := atomic.LoadInt32(&chunkCount)
+	if final < 1 {
+		t.Errorf("chunkCount = %d, want >= 1", final)
+	}
+	if final >= 8 {
+		t.Errorf("chunkCount = %d, want < 8 (cancellation should have prevented all chunks)", final)
+	}
+}
