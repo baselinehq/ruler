@@ -53,8 +53,18 @@ func TestFindGaps_MiddleHole(t *testing.T) {
 	vals := []float64{1, 1, 1, 1, 1}
 	probe := Result{Data: []Metric{{Timestamps: ts, Values: vals}}}
 	got := findGaps(probe, 0, start, now, step)
-	if len(got) < 1 {
-		t.Fatalf("got %v, want at least one gap", got)
+	if len(got) != 2 {
+		t.Fatalf("got %d gaps %v, want 2", len(got), got)
+	}
+	wantStart1 := start.Add(10 * time.Minute)
+	wantEnd1 := start.Add(30 * time.Minute)
+	wantStart2 := start.Add(40 * time.Minute)
+	wantEnd2 := start.Add(55 * time.Minute)
+	if !got[0].Start.Equal(wantStart1) || !got[0].End.Equal(wantEnd1) {
+		t.Errorf("gap[0] = %v, want [%v, %v]", got[0], wantStart1, wantEnd1)
+	}
+	if !got[1].Start.Equal(wantStart2) || !got[1].End.Equal(wantEnd2) {
+		t.Errorf("gap[1] = %v, want [%v, %v]", got[1], wantStart2, wantEnd2)
 	}
 }
 
