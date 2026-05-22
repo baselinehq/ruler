@@ -271,4 +271,45 @@ func TestExecChunk_EmptyResultSkipsWrite(t *testing.T) {
 	}
 }
 
+func TestEmitProgressMarker_WritesExpectedSeries(t *testing.T) {
+	wr := &testCapturingWriter{}
+	r := &replayRunner{
+		cfg:    ReplayConfig{ProgressMetric: "ruler_replay_progress"},
+		rule:   Rule{ID: 7, Record: "out"},
+		writer: wr,
+		logger: &testLogger{t: t},
+	}
+	chunkEnd := time.Unix(1_700_000_000, 0)
+	r.emitProgressMarker(context.Background(), chunkEnd)
+	if len(wr.writes) != 1 || len(wr.writes[0]) != 1 {
+		t.Fatalf("writes = %v", wr.writes)
+	}
+	ts := wr.writes[0][0]
+	labels := map[string]string{}
+	for _, l := range ts.Labels {
+		labels[l.Name] = l.Value
+	}
+	if labels["__name__"] != "ruler_replay_progress" {
+		t.Errorf("__name__ = %q", labels["__name__"])
+	}
+	if labels["rule_id"] != "7" {
+		t.Errorf("rule_id = %q", labels["rule_id"])
+	}
+	if labels["record"] != "out" {
+		t.Errorf("record = %q", labels["record"])
+	}
+	if ts.Samples[0].Value != float64(chunkEnd.Unix()) {
+		t.Errorf("value = %v, want %v", ts.Samples[0].Value, float64(chunkEnd.Unix()))
+	}
+}
+
+func TestEmitProgressMarker_DisabledNoop(t *testing.T) {
+	wr := &testCapturingWriter{}
+	r := &replayRunner{cfg: ReplayConfig{ProgressMetric: ""}, writer: wr}
+	r.emitProgressMarker(context.Background(), time.Now())
+	if len(wr.writes) != 0 {
+		t.Errorf("got writes %v, want none", wr.writes)
+	}
+}
+
 var _ = time.Now

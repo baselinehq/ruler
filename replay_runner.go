@@ -76,6 +76,28 @@ func (r *replayRunner) validateSources(inv *metricInventory, records map[string]
 	return nil
 }
 
+// emitProgressMarker writes a single sample to ProgressMetric series.
+// Best-effort: failures logged, not propagated.
+func (r *replayRunner) emitProgressMarker(ctx context.Context, chunkEnd time.Time) {
+	if r.cfg.ProgressMetric == "" {
+		return
+	}
+	series := prompb.TimeSeries{
+		Labels: []prompb.Label{
+			{Name: "__name__", Value: r.cfg.ProgressMetric},
+			{Name: "rule_id", Value: strconv.FormatUint(r.rule.ID, 10)},
+			{Name: "record", Value: r.rule.Record},
+		},
+		Samples: []prompb.Sample{{
+			Value:     float64(chunkEnd.Unix()),
+			Timestamp: time.Now().UnixMilli(),
+		}},
+	}
+	if err := r.writer.Write(ctx, []prompb.TimeSeries{series}); err != nil {
+		r.logger.Errorf("replay: progress marker write failed for rule %q: %v", r.rule.Record, err)
+	}
+}
+
 // execChunk runs one chunk: QueryRange → toTimeSeries → Write, with retry.
 func (r *replayRunner) execChunk(ctx context.Context, chunk timeRange) error {
 	chunkCtx, cancel := context.WithTimeout(ctx, r.cfg.ChunkTimeout)
