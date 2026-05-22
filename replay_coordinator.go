@@ -148,13 +148,20 @@ func (c *replayCoordinator) OnApply(_ context.Context, cfg Config) {
 	}
 
 	// 1. Build inventory once per process.
-	if c.inv == nil && c.httpClient != nil {
+	c.mu.Lock()
+	needFetch := c.inv == nil && c.httpClient != nil
+	c.mu.Unlock()
+	if needFetch {
 		inv, err := fetchInventory(c.ctx, c.httpClient)
 		if err != nil {
 			c.logger.Errorf("replay: inventory fetch failed, skipping run: %v", err)
 			return
 		}
-		c.inv = inv
+		c.mu.Lock()
+		if c.inv == nil {
+			c.inv = inv
+		}
+		c.mu.Unlock()
 	}
 
 	// 2. Build dep graph + handle cycles.
@@ -184,6 +191,9 @@ func (c *replayCoordinator) OnApply(_ context.Context, cfg Config) {
 	}
 
 	// 4. Spawn runners in topo order.
+	c.mu.Lock()
+	inv := c.inv
+	c.mu.Unlock()
 	for _, id := range graph.order {
 		if !c.markProbed(id) {
 			continue
@@ -220,8 +230,8 @@ func (c *replayCoordinator) OnApply(_ context.Context, cfg Config) {
 		labels = mergeLabelSets(c.logger, grp.Name, rule.Name(), labels, rule.Labels)
 		runner.ruleLabels = prepareRuleLabels(labels)
 
-		if c.inv != nil {
-			if err := runner.validateSources(c.inv, records); err != nil {
+		if inv != nil {
+			if err := runner.validateSources(inv, records); err != nil {
 				c.logger.Errorf("replay: validate sources rule=%q: %v", rule.Record, err)
 				c.setOutcome(id, OutcomeSkippedNoSource)
 				continue
