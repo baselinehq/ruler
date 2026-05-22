@@ -195,7 +195,14 @@ func (c *replayCoordinator) OnApply(_ context.Context, cfg Config) {
 	inv := c.inv
 	c.mu.Unlock()
 	for _, id := range graph.order {
-		if !c.markProbed(id) {
+		// Skip already-probed rules without consuming an eligibility check.
+		// markProbed is deferred until after eligibility passes so disabled or
+		// no-source rules can retry on a subsequent Apply once the operator fixes
+		// the underlying condition.
+		c.mu.Lock()
+		_, alreadyProbed := c.probed[id]
+		c.mu.Unlock()
+		if alreadyProbed {
 			continue
 		}
 		grp := groupByRule[id]
@@ -236,6 +243,12 @@ func (c *replayCoordinator) OnApply(_ context.Context, cfg Config) {
 				c.setOutcome(id, OutcomeSkippedNoSource)
 				continue
 			}
+		}
+
+		// Eligibility passed — claim the probed slot now. If a concurrent OnApply
+		// already claimed it, drop through and let the other goroutine spawn.
+		if !c.markProbed(id) {
+			continue
 		}
 
 		select {
