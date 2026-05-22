@@ -136,20 +136,21 @@ func (p Params) Values() url.Values {
 
 // Group describes a rule group with vmalert-style extras.
 type Group struct {
-	Type          string            `yaml:"type,omitempty"`
-	File          string            `yaml:"-"`
-	Name          string            `yaml:"name"`
-	Interval      *model.Duration   `yaml:"interval,omitempty"`
-	EvalOffset    *model.Duration   `yaml:"eval_offset,omitempty"`
-	EvalDelay     *model.Duration   `yaml:"eval_delay,omitempty"`
-	Limit         *int              `yaml:"limit,omitempty"`
-	Rules         []Rule            `yaml:"rules"`
-	Concurrency   int               `yaml:"concurrency,omitempty"`
-	Labels        map[string]string `yaml:"labels,omitempty"`
-	Params        Params            `yaml:"params,omitempty"`
-	Headers       []Header          `yaml:"headers,omitempty"`
-	EvalAlignment *bool             `yaml:"eval_alignment,omitempty"`
-	Debug         bool              `yaml:"debug,omitempty"`
+	Type          string             `yaml:"type,omitempty"`
+	File          string             `yaml:"-"`
+	Name          string             `yaml:"name"`
+	Interval      *model.Duration    `yaml:"interval,omitempty"`
+	EvalOffset    *model.Duration    `yaml:"eval_offset,omitempty"`
+	EvalDelay     *model.Duration    `yaml:"eval_delay,omitempty"`
+	Limit         *int               `yaml:"limit,omitempty"`
+	Rules         []Rule             `yaml:"rules"`
+	Concurrency   int                `yaml:"concurrency,omitempty"`
+	Labels        map[string]string  `yaml:"labels,omitempty"`
+	Params        Params             `yaml:"params,omitempty"`
+	Headers       []Header           `yaml:"headers,omitempty"`
+	EvalAlignment *bool              `yaml:"eval_alignment,omitempty"`
+	Replay        *GroupReplayConfig `yaml:"replay,omitempty"`
+	Debug         bool               `yaml:"debug,omitempty"`
 
 	Checksum string         `yaml:"-"`
 	XXX      map[string]any `yaml:",inline"`
@@ -230,6 +231,10 @@ func (g *Group) Validate() error {
 		if _, err := parser.ParseExpr(g.Rules[i].Expr); err != nil {
 			return fmt.Errorf("invalid expression for rule %q: %w", ruleName, err)
 		}
+	}
+
+	if err := g.Replay.Validate(); err != nil {
+		return fmt.Errorf("invalid replay config: %w", err)
 	}
 
 	return checkOverflow(g.XXX, fmt.Sprintf("group %q", g.Name))
