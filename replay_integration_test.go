@@ -2,6 +2,7 @@ package ruler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -452,5 +453,71 @@ groups:
 	}
 	if final >= 8 {
 		t.Errorf("chunkCount = %d, want < 8 (cancellation should have prevented all chunks)", final)
+	}
+}
+
+func TestReplayIntegration_ChunkRetrySuccess(t *testing.T) {
+	srv := invServer("foo")
+	defer srv.Close()
+	client, _ := NewHTTPClient(HTTPConfig{URL: srv.URL, Timeout: 5 * time.Second})
+
+	var attempts int32
+	q := &testRangeQuerier{
+		probeFunc: func(query string, start, end time.Time) (Result, error) {
+			n := atomic.AddInt32(&attempts, 1)
+			if n <= 2 {
+				return Result{}, errors.New(`status=503 body="upstream"`)
+			}
+			ts := makeRangeTimestamps(start, end, 15*time.Minute)
+			vals := make([]float64, len(ts))
+			for i := range vals {
+				vals[i] = 1
+			}
+			return Result{Data: []Metric{{
+				Labels:     []prompb.Label{{Name: "k", Value: "v"}},
+				Timestamps: ts,
+				Values:     vals,
+			}}}, nil
+		},
+	}
+	wr := &testCapturingWriter{}
+
+	cfg := mustParseConfigBytes(t, []byte(`
+groups:
+  - name: g
+    interval: 30m
+    replay:
+      enabled: true
+      span: 30m
+    rules:
+      - record: out_metric
+        expr: rate(foo[5m])
+`))
+	mgr, err := NewManager(ManagerConfig{
+		QuerierBuilder: q, Writer: wr, Context: context.Background(),
+		EvaluationInterval: time.Hour, Logger: &testLogger{t: t},
+		Replay: &ReplayConfig{
+			Enabled: true, DefaultSpan: 30 * time.Minute, BatchInterval: 30 * time.Minute,
+			ChunkTimeout: 10 * time.Second, Concurrency: 1, RulesConcurrency: 1,
+			ProbeOutput: false,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.replay.httpClient = client
+	defer mgr.Stop()
+	if err := mgr.Apply(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	ruleID := cfg.Groups[0].Rules[0].ID
+	waitOutcome(t, mgr.replay, ruleID, 15*time.Second)
+
+	if got := mgr.replay.outcome(ruleID); got != OutcomeCompleted {
+		t.Errorf("outcome = %v, want completed", got)
+	}
+	if got := atomic.LoadInt32(&attempts); got <= 2 {
+		t.Errorf("attempts = %d, want > 2 (expected at least one retry observed)", got)
 	}
 }
