@@ -14,12 +14,18 @@ type GroupReplayConfig struct {
 	Enabled     *bool           `yaml:"enabled,omitempty"`
 	Span        *model.Duration `yaml:"span,omitempty"`
 	MaxLookback *model.Duration `yaml:"max_lookback,omitempty"`
+
+	XXX map[string]any `yaml:",inline"`
 }
 
-// Validate checks per-group replay fields.
+// Validate checks per-group replay fields. Unknown YAML keys under `replay:`
+// are rejected so typos (e.g. `eanbled:`) surface at parse time.
 func (g *GroupReplayConfig) Validate() error {
 	if g == nil {
 		return nil
+	}
+	if err := checkOverflow(g.XXX, "group replay"); err != nil {
+		return err
 	}
 	if g.Span != nil && time.Duration(*g.Span) < 0 {
 		return fmt.Errorf("replay.span shouldn't be lower than 0")
