@@ -158,3 +158,92 @@ groups:
 		t.Errorf("writes = %d, want 0", len(wr.writes))
 	}
 }
+
+func TestReplayIntegration_PartialGap(t *testing.T) {
+	srv := invServer("foo")
+	defer srv.Close()
+	client, _ := NewHTTPClient(HTTPConfig{URL: srv.URL, Timeout: time.Second})
+
+	q := &testRangeQuerier{
+		probeFunc: func(query string, start, end time.Time) (Result, error) {
+			switch query {
+			case "count(out_metric)":
+				ts := []int64{start.UnixMilli(), start.Add(15 * time.Minute).UnixMilli()}
+				vals := []float64{1, 1}
+				return Result{Data: []Metric{{
+					Labels:     []prompb.Label{{Name: "k", Value: "v"}},
+					Timestamps: ts,
+					Values:     vals,
+				}}}, nil
+			case "rate(foo[5m])":
+				ts := makeRangeTimestamps(start, end, 15*time.Minute)
+				vals := make([]float64, len(ts))
+				for i := range vals {
+					vals[i] = 1
+				}
+				return Result{Data: []Metric{{
+					Labels:     []prompb.Label{{Name: "k", Value: "v"}},
+					Timestamps: ts,
+					Values:     vals,
+				}}}, nil
+			}
+			return Result{}, nil
+		},
+	}
+	wr := &testCapturingWriter{}
+
+	cfg := mustParseConfigBytes(t, []byte(`
+groups:
+  - name: g
+    interval: 30m
+    replay:
+      enabled: true
+      span: 1h
+    rules:
+      - record: out_metric
+        expr: rate(foo[5m])
+`))
+	mgr, err := NewManager(ManagerConfig{
+		QuerierBuilder: q, Writer: wr, Context: context.Background(),
+		EvaluationInterval: time.Hour, Logger: &testLogger{t: t},
+		Replay: &ReplayConfig{
+			Enabled: true, DefaultSpan: time.Hour, BatchInterval: 30 * time.Minute,
+			ChunkTimeout: time.Second, Concurrency: 1, RulesConcurrency: 2,
+			ProbeOutput: true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.replay.httpClient = client
+	defer mgr.Stop()
+	if err := mgr.Apply(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	ruleID := cfg.Groups[0].Rules[0].ID
+	waitOutcome(t, mgr.replay, ruleID, 5*time.Second)
+
+	if got := mgr.replay.outcome(ruleID); got != OutcomeCompleted {
+		t.Errorf("outcome = %v, want completed", got)
+	}
+	if len(wr.writes) == 0 {
+		t.Fatal("no writes captured")
+	}
+
+	now := time.Now()
+	spanMidMillis := now.Add(-30 * time.Minute).UnixMilli()
+	foundSecondHalf := false
+	for _, batch := range wr.writes {
+		for _, ts := range batch {
+			for _, sample := range ts.Samples {
+				if sample.Timestamp >= spanMidMillis {
+					foundSecondHalf = true
+				}
+			}
+		}
+	}
+	if !foundSecondHalf {
+		t.Error("expected at least one sample in the second half of the span")
+	}
+}
