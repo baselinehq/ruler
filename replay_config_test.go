@@ -85,3 +85,36 @@ func TestGroupReplayConfig_NilSafe(t *testing.T) {
 		t.Errorf("nil should not error: %v", err)
 	}
 }
+
+func TestReplayConfig_AppliesDefaults(t *testing.T) {
+	got := ReplayConfig{Enabled: true}.applyDefaults()
+	if got.BatchInterval != 6*time.Hour {
+		t.Errorf("BatchInterval = %v, want 6h", got.BatchInterval)
+	}
+	if got.Concurrency != 2 {
+		t.Errorf("Concurrency = %d, want 2", got.Concurrency)
+	}
+	if got.RulesConcurrency != 4 {
+		t.Errorf("RulesConcurrency = %d, want 4", got.RulesConcurrency)
+	}
+	if got.ChunkTimeout != 5*time.Minute {
+		t.Errorf("ChunkTimeout = %v, want 5m", got.ChunkTimeout)
+	}
+	if got.GapMergeWindow != 12*time.Hour {
+		t.Errorf("GapMergeWindow = %v, want 2 * BatchInterval", got.GapMergeWindow)
+	}
+}
+
+func TestReplayConfig_ValidateRejectsBadProgressMetric(t *testing.T) {
+	c := ReplayConfig{ProgressMetric: "not a metric name"}
+	if err := c.validate(); err == nil {
+		t.Fatal("want error for invalid metric name")
+	}
+}
+
+func TestReplayConfig_ValidateRejectsDefaultSpanAboveMaxLookback(t *testing.T) {
+	c := ReplayConfig{DefaultSpan: 30 * 24 * time.Hour, MaxLookback: 7 * 24 * time.Hour}
+	if err := c.validate(); err == nil {
+		t.Fatal("want error when DefaultSpan > MaxLookback")
+	}
+}
