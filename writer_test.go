@@ -2,6 +2,7 @@ package ruler
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	remotewrite "github.com/baselinehq/remote-write"
@@ -54,7 +55,17 @@ func TestRemoteWriteWriter_DelegatesToPusher(t *testing.T) {
 
 func TestRemoteWriteWriter_NilClientErrors(t *testing.T) {
 	w := &RemoteWriteWriter{Client: nil}
-	if err := w.Write(context.Background(), nil); err == nil {
-		t.Error("expected error for nil Client")
+	err := w.Write(context.Background(), nil)
+	if !errors.Is(err, ErrNoWriter) {
+		t.Errorf("err = %v, want ErrNoWriter", err)
+	}
+}
+
+func TestRemoteWriteWriter_PropagatesPusherError(t *testing.T) {
+	wantErr := errors.New("boom")
+	stub := &stubPusher{err: wantErr}
+	w := &RemoteWriteWriter{Client: stub}
+	if err := w.Write(context.Background(), nil); !errors.Is(err, wantErr) {
+		t.Errorf("err = %v, want %v", err, wantErr)
 	}
 }

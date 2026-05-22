@@ -12,10 +12,11 @@ import (
 // underlying remote_write client. Both *remotewrite.Client and
 // *remotewrite.DurableClient satisfy this interface.
 //
-// Callers wiring up a DurableClient are responsible for invoking
-// DurableClient.Run(ctx) in a background goroutine before passing it here,
-// and for invoking DurableClient.Close() during shutdown. ruler does not
-// own that lifecycle — see docs/superpowers/specs/2026-05-22-ruler-replay-design.md.
+// DurableClient adds an on-disk spool plus a background drain goroutine for
+// resilience against transient remote_write failures and rate limits. Callers
+// wiring up a DurableClient are responsible for invoking DurableClient.Run(ctx)
+// in a background goroutine before passing it here, and for invoking
+// DurableClient.Close() during shutdown. ruler does not own that lifecycle.
 type Pusher interface {
 	PushTimeSeries(ctx context.Context, req remotewrite.PushTimeSeriesRequest) error
 }
