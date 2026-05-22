@@ -3,6 +3,7 @@ package ruler
 import (
 	"context"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -107,4 +108,66 @@ func makeValues(n int) []float64 {
 		vals[i] = float64(i + 1)
 	}
 	return vals
+}
+
+// testRangeQuerier serves canned matrix responses keyed by query string,
+// with optional per-query error injection. QueryRange honors the [start,end]
+// window by filtering timestamps in range.
+type testRangeQuerier struct {
+	mu          sync.Mutex
+	responses   map[string][]Metric
+	rangeErr    error
+	probeFunc   func(query string, start, end time.Time) (Result, error)
+	instantFunc func(query string, ts time.Time) (Result, error)
+}
+
+func (q *testRangeQuerier) Build(params QueryParams) Querier { return q }
+
+func (q *testRangeQuerier) Query(ctx context.Context, query string, ts time.Time) (Result, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.instantFunc != nil {
+		return q.instantFunc(query, ts)
+	}
+	if data, ok := q.responses[query]; ok {
+		return Result{Data: data}, nil
+	}
+	return Result{}, nil
+}
+
+func (q *testRangeQuerier) QueryRange(ctx context.Context, query string, start, end time.Time) (Result, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.rangeErr != nil {
+		return Result{}, q.rangeErr
+	}
+	if q.probeFunc != nil {
+		return q.probeFunc(query, start, end)
+	}
+	if data, ok := q.responses[query]; ok {
+		out := make([]Metric, 0, len(data))
+		for _, m := range data {
+			var ts []int64
+			var vs []float64
+			for i, t := range m.Timestamps {
+				if t >= start.UnixMilli() && t <= end.UnixMilli() {
+					ts = append(ts, t)
+					vs = append(vs, m.Values[i])
+				}
+			}
+			if len(ts) > 0 {
+				out = append(out, Metric{Labels: m.Labels, Timestamps: ts, Values: vs})
+			}
+		}
+		return Result{Data: out}, nil
+	}
+	return Result{}, nil
+}
+
+func mustParseConfigBytes(t *testing.T, b []byte) Config {
+	cfg, err := ParseConfig(b)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	return *cfg
 }
