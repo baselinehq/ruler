@@ -154,6 +154,9 @@ func (m *Manager) Apply(cfg Config) error {
 
 // Stop stops all groups managed by the manager.
 func (m *Manager) Stop() {
+	if m.replay != nil {
+		m.replay.Stop()
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for id, g := range m.groups {
