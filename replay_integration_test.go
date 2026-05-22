@@ -678,9 +678,15 @@ func TestReplayIntegration_ApplyReturnsImmediately(t *testing.T) {
 	srv := invServer("foo")
 	defer srv.Close()
 	client, _ := NewHTTPClient(HTTPConfig{URL: srv.URL, Timeout: time.Second})
+	probeStarted := make(chan struct{}, 1)
+	releaseProbe := make(chan struct{})
 	q := &testRangeQuerier{
 		probeFunc: func(query string, start, end time.Time) (Result, error) {
-			time.Sleep(500 * time.Millisecond)
+			select {
+			case probeStarted <- struct{}{}:
+			default:
+			}
+			<-releaseProbe
 			return Result{}, nil
 		},
 		responses: map[string][]Metric{},
@@ -701,7 +707,6 @@ groups:
 		Replay: &ReplayConfig{Enabled: true, DefaultSpan: time.Hour, BatchInterval: 30 * time.Minute, ChunkTimeout: time.Second, RulesConcurrency: 1, Concurrency: 1, ProbeOutput: true},
 	})
 	mgr.replay.httpClient = client
-	defer mgr.Stop()
 	start := time.Now()
 	if err := mgr.Apply(cfg); err != nil {
 		t.Fatal(err)
@@ -709,6 +714,16 @@ groups:
 	if dur := time.Since(start); dur > 100*time.Millisecond {
 		t.Errorf("Apply took %v, want <100ms", dur)
 	}
+
+	select {
+	case <-probeStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("probe did not start within 2s")
+	}
+	close(releaseProbe)
+	ruleID := cfg.Groups[0].Rules[0].ID
+	waitOutcome(t, mgr.replay, ruleID, 5*time.Second)
+	mgr.Stop()
 }
 
 func TestReplayIntegration_RuleLabelsPropagate(t *testing.T) {
