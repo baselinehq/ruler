@@ -174,7 +174,7 @@ func (c *replayCoordinator) OnApply(_ context.Context, cfg Config) {
 		}
 		grp := groupByRule[id]
 		if grp.Replay != nil && grp.Replay.Enabled != nil && !*grp.Replay.Enabled {
-			c.setOutcome(id, OutcomeSkippedNoSpan)
+			c.setOutcome(id, OutcomeSkippedDisabled)
 			continue
 		}
 		rule := rulesByID[id]

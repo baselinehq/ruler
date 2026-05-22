@@ -10,6 +10,7 @@ const (
 	OutcomeSkippedAlreadyBackfilled
 	OutcomeSkippedNoSpan
 	OutcomeSkippedNoSource
+	OutcomeSkippedDisabled
 	OutcomeSkippedRetention
 	OutcomeCycle
 	OutcomeFailed
@@ -26,6 +27,8 @@ func (o ReplayOutcome) String() string {
 		return "skipped_no_span"
 	case OutcomeSkippedNoSource:
 		return "skipped_no_source"
+	case OutcomeSkippedDisabled:
+		return "skipped_disabled"
 	case OutcomeSkippedRetention:
 		return "skipped_retention"
 	case OutcomeCycle:

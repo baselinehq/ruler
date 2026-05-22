@@ -750,8 +750,8 @@ groups:
 	ruleID := cfg.Groups[0].Rules[0].ID
 	waitOutcome(t, mgr.replay, ruleID, 5*time.Second)
 
-	if got := mgr.replay.outcome(ruleID); got != OutcomeSkippedNoSpan {
-		t.Errorf("outcome = %v, want skipped_no_span", got)
+	if got := mgr.replay.outcome(ruleID); got != OutcomeSkippedDisabled {
+		t.Errorf("outcome = %v, want skipped_disabled", got)
 	}
 	if len(wr.writes) != 0 {
 		t.Errorf("writes = %d, want 0", len(wr.writes))
