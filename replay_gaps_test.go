@@ -84,3 +84,15 @@ func TestMergeGaps_AboveWindowPreserved(t *testing.T) {
 		t.Errorf("got %v, want 2 preserved gaps", got)
 	}
 }
+
+func TestMergeGaps_NegativeWindowIsNoop(t *testing.T) {
+	t0 := time.Unix(1_700_000_000, 0)
+	in := []timeRange{
+		tr(t0, t0.Add(10*time.Minute)),
+		tr(t0.Add(15*time.Minute), t0.Add(25*time.Minute)),
+	}
+	got := mergeGaps(in, -1*time.Minute)
+	if len(got) != 2 {
+		t.Errorf("got %d gaps, want 2 (no merge)", len(got))
+	}
+}

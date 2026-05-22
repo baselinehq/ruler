@@ -133,7 +133,7 @@ func kahnTopoSort(nodes map[uint64]*depNode) (order, cycle []uint64) {
 
 // extractSelectors returns the unique metric names referenced by `expr`.
 // Both instant (VectorSelector) and range (MatrixSelector wraps a VectorSelector)
-// selectors are captured. Walks the AST via parser.Walk.
+// selectors are captured. Walks the AST via parser.Inspect.
 func extractSelectors(expr string) ([]string, error) {
 	tree, err := parser.ParseExpr(expr)
 	if err != nil {

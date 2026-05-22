@@ -67,6 +67,20 @@ func TestRetryChunk_CtxCancelStopsLoop(t *testing.T) {
 	}
 }
 
+func TestRetryChunk_ZeroMaxAttemptsCoercesToOne(t *testing.T) {
+	attempts := 0
+	err := retryChunk(context.Background(), retryConfig{MaxAttempts: 0, InitialDelay: time.Millisecond, MaxDelay: 2 * time.Millisecond}, func() error {
+		attempts++
+		return io.EOF
+	})
+	if err == nil {
+		t.Fatal("want non-nil error")
+	}
+	if attempts != 1 {
+		t.Errorf("attempts = %d, want 1 (coerced)", attempts)
+	}
+}
+
 func TestIsRetryable(t *testing.T) {
 	cases := []struct {
 		err  error
