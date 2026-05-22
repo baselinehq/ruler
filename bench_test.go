@@ -342,3 +342,20 @@ func BenchmarkReplay_TopoSort(b *testing.B) {
 		_, _ = buildDepGraph(cfg)
 	}
 }
+
+func BenchmarkReplay_ToTimeSeriesMatrix(b *testing.B) {
+	res := Result{Data: make([]Metric, 1000)}
+	for i := range res.Data {
+		res.Data[i] = Metric{
+			Labels:     makeLabels(8),
+			Timestamps: makeTimestamps(100),
+			Values:     makeValues(100),
+		}
+	}
+	r := &replayRunner{rule: Rule{Record: "rec"}, ruleLabels: []prompb.Label{{Name: "tier", Value: "prod"}}}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = r.toTimeSeriesMatrix(res)
+	}
+}
