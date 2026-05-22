@@ -312,4 +312,39 @@ func TestEmitProgressMarker_DisabledNoop(t *testing.T) {
 	}
 }
 
+func TestRunnerRun_HappyPath(t *testing.T) {
+	now := time.Now()
+	wr := &testCapturingWriter{}
+	q := &testQuerier{result: Result{Data: []Metric{{
+		Labels:     []prompb.Label{{Name: "k", Value: "v"}},
+		Timestamps: []int64{now.Add(-2 * time.Hour).UnixMilli()},
+		Values:     []float64{1},
+	}}}}
+	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{
+		Enabled:       true,
+		DefaultSpan:   1 * time.Hour,
+		BatchInterval: 30 * time.Minute,
+		ChunkTimeout:  time.Second,
+		Concurrency:   1,
+		ProbeOutput:   false,
+	}, q, wr, &testLogger{t: t})
+	defer c.Stop()
+	r := &replayRunner{
+		rule:   Rule{Record: "out", Expr: "rate(foo[5m])", ID: 1},
+		cfg:    c.cfg,
+		q:      q,
+		writer: wr,
+		coord:  c,
+		logger: &testLogger{t: t},
+		done:   c.doneCh(1),
+	}
+	r.Run(context.Background())
+	if got := c.outcome(1); got != OutcomeCompleted {
+		t.Errorf("outcome = %v, want completed", got)
+	}
+	if len(wr.writes) == 0 {
+		t.Error("no writes captured")
+	}
+}
+
 var _ = time.Now

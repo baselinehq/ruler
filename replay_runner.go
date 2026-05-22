@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/prometheus/prometheus/prompb"
@@ -74,6 +75,85 @@ func (r *replayRunner) validateSources(inv *metricInventory, records map[string]
 		return fmt.Errorf("source metrics not found in TSDB: %v", missing)
 	}
 	return nil
+}
+
+// Run executes the full 7-phase replay pipeline. Idempotent on outcome:
+// always closes the rule's done channel and records an outcome.
+func (r *replayRunner) Run(ctx context.Context) {
+	defer func() {
+		if r.coord.outcome(r.rule.ID) == OutcomePending {
+			r.coord.setOutcome(r.rule.ID, OutcomeFailed)
+		}
+	}()
+
+	now := time.Now()
+	span, _, err := resolveSpan(r.cfg, r.groupCfg, r.minDepth, 0)
+	if err != nil {
+		r.logger.Errorf("replay: resolveSpan rule=%q: %v", r.rule.Record, err)
+		switch err {
+		case ErrReplayNoSpan:
+			r.coord.setOutcome(r.rule.ID, OutcomeSkippedNoSpan)
+		case ErrReplayRetentionBelowMinDepth:
+			r.coord.setOutcome(r.rule.ID, OutcomeSkippedRetention)
+		default:
+			r.coord.setOutcome(r.rule.ID, OutcomeFailed)
+		}
+		return
+	}
+	resumeFrom := now.Add(-span)
+
+	if mark, err := r.readProgressMarker(ctx); err == nil && !mark.IsZero() && mark.After(resumeFrom) {
+		resumeFrom = mark
+	}
+
+	step := r.cfg.BatchInterval
+	gaps, err := r.probeCoverage(ctx, resumeFrom, now, step)
+	if err != nil {
+		r.logger.Warnf("replay: probe rule=%q: %v (treating as full gap)", r.rule.Record, err)
+		gaps = []timeRange{{Start: resumeFrom, End: now}}
+	}
+	if len(gaps) == 0 {
+		r.logger.Infof("replay: rule=%q already backfilled, skipping", r.rule.Record)
+		r.coord.setOutcome(r.rule.ID, OutcomeSkippedAlreadyBackfilled)
+		return
+	}
+
+	chunks := planChunks(gaps, r.cfg.BatchInterval)
+
+	sem := make(chan struct{}, r.cfg.Concurrency)
+	var wg sync.WaitGroup
+	var errCount int
+	var errMu sync.Mutex
+	for _, chunk := range chunks {
+		select {
+		case <-ctx.Done():
+			r.coord.setOutcome(r.rule.ID, OutcomeCancelled)
+			return
+		default:
+		}
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(c timeRange) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if err := r.execChunk(ctx, c); err != nil {
+				r.logger.Errorf("replay: chunk rule=%q [%v,%v]: %v", r.rule.Record, c.Start, c.End, err)
+				errMu.Lock()
+				errCount++
+				errMu.Unlock()
+				return
+			}
+			r.emitProgressMarker(ctx, c.End)
+		}(chunk)
+	}
+	wg.Wait()
+
+	if errCount == 0 {
+		r.coord.setOutcome(r.rule.ID, OutcomeCompleted)
+	} else {
+		r.coord.setOutcome(r.rule.ID, OutcomeFailed)
+	}
+	r.logger.Infof("replay: rule=%q done outcome=%s chunks=%d errors=%d", r.rule.Record, r.coord.outcome(r.rule.ID), len(chunks), errCount)
 }
 
 // emitProgressMarker writes a single sample to ProgressMetric series.
