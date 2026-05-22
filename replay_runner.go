@@ -2,6 +2,7 @@ package ruler
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/prometheus/prometheus/prompb"
@@ -49,6 +50,29 @@ func (r *replayRunner) toTimeSeriesMatrix(res Result) []prompb.TimeSeries {
 		out = append(out, prompb.TimeSeries{Labels: labels, Samples: samples})
 	}
 	return out
+}
+
+// validateSources verifies that every external metric referenced by the rule
+// expression exists in inv. Recorded-rule refs (those in records) are skipped
+// because their existence is the responsibility of the upstream replayRunner.
+func (r *replayRunner) validateSources(inv *metricInventory, records map[string]uint64) error {
+	selectors, err := extractSelectors(r.rule.Expr)
+	if err != nil {
+		return err
+	}
+	var missing []string
+	for _, name := range selectors {
+		if _, isRecorded := records[name]; isRecorded {
+			continue
+		}
+		if !inv.Has(name) {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("source metrics not found in TSDB: %v", missing)
+	}
+	return nil
 }
 
 // Touch context import - used by later phases of the runner.

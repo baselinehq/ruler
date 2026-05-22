@@ -62,6 +62,33 @@ func TestToTimeSeriesMatrix_MergesRuleLabels(t *testing.T) {
 	}
 }
 
+func TestValidateSources_AllowsRecordedRefs(t *testing.T) {
+	inv := &metricInventory{knownNames: map[string]struct{}{}}
+	records := map[string]uint64{"baseline:foo:rate5m": 1}
+	r := &replayRunner{rule: Rule{Expr: `avg_over_time(baseline:foo:rate5m[7d:5m])`}}
+	if err := r.validateSources(inv, records); err != nil {
+		t.Errorf("err = %v, want nil (recorded ref)", err)
+	}
+}
+
+func TestValidateSources_RejectsMissingExternal(t *testing.T) {
+	inv := &metricInventory{knownNames: map[string]struct{}{}}
+	records := map[string]uint64{}
+	r := &replayRunner{rule: Rule{Expr: `rate(container_cpu_usage_seconds_total[5m])`}}
+	if err := r.validateSources(inv, records); err == nil {
+		t.Error("want error for missing external metric")
+	}
+}
+
+func TestValidateSources_AllowsKnownExternal(t *testing.T) {
+	inv := &metricInventory{knownNames: map[string]struct{}{"container_cpu_usage_seconds_total": {}}}
+	records := map[string]uint64{}
+	r := &replayRunner{rule: Rule{Expr: `rate(container_cpu_usage_seconds_total[5m])`}}
+	if err := r.validateSources(inv, records); err != nil {
+		t.Errorf("err = %v, want nil", err)
+	}
+}
+
 // Touch context import (used in later runner tests)
 var _ = context.Background
 var _ = time.Now
