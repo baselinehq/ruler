@@ -2,7 +2,13 @@ package ruler
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+	"time"
+
+	"github.com/prometheus/common/model"
+	"github.com/prometheus/prometheus/prompb"
 )
 
 func TestCoordinator_DisabledReturnsNil(t *testing.T) {
@@ -53,4 +59,64 @@ func TestCoordinator_UpdateProgressMonotonic(t *testing.T) {
 	if got := c.progress[1]; got != 200 {
 		t.Errorf("progress = %d, want 200", got)
 	}
+}
+
+func TestCoordinatorOnApply_SpawnsRunnerForNewRule(t *testing.T) {
+	invSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"success","data":["up","foo"]}`))
+	}))
+	defer invSrv.Close()
+	client, _ := NewHTTPClient(HTTPConfig{URL: invSrv.URL, Timeout: time.Second})
+
+	wr := &testCapturingWriter{}
+	q := &queryAdapter{HTTPClient: client, result: Result{Data: []Metric{{
+		Labels:     []prompb.Label{{Name: "k", Value: "v"}},
+		Timestamps: []int64{time.Now().UnixMilli()},
+		Values:     []float64{1},
+	}}}}
+
+	c, err := newReplayCoordinator(context.Background(), ReplayConfig{
+		Enabled: true, DefaultSpan: 1 * time.Hour, BatchInterval: 30 * time.Minute,
+		ChunkTimeout: time.Second, Concurrency: 1, RulesConcurrency: 2,
+	}, q, wr, &testLogger{t: t})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Stop()
+	c.httpClient = client
+
+	interval := model.Duration(time.Minute)
+	cfg := Config{Groups: []Group{{
+		Name: "g", Type: "prometheus", Interval: &interval,
+		Rules: []Rule{mkRule("out", "rate(foo[5m])")},
+	}}}
+
+	c.OnApply(context.Background(), cfg)
+	// Wait for outcome (timeout-bounded).
+	deadline := time.Now().Add(5 * time.Second)
+	ruleID := cfg.Groups[0].Rules[0].ID
+	for time.Now().Before(deadline) {
+		if c.outcome(ruleID) != OutcomePending {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !c.outcome(ruleID).IsSuccess() {
+		t.Errorf("outcome = %v", c.outcome(ruleID))
+	}
+}
+
+// queryAdapter combines an HTTPClient (for inventory) with canned Querier responses.
+type queryAdapter struct {
+	*HTTPClient
+	result Result
+	err    error
+}
+
+func (q *queryAdapter) Build(params QueryParams) Querier { return q }
+func (q *queryAdapter) Query(ctx context.Context, query string, ts time.Time) (Result, error) {
+	return q.result, q.err
+}
+func (q *queryAdapter) QueryRange(ctx context.Context, query string, start, end time.Time) (Result, error) {
+	return q.result, q.err
 }

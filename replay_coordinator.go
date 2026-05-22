@@ -120,3 +120,105 @@ func (c *replayCoordinator) updateProgress(ruleID uint64, chunkEnd int64) {
 		c.progress[ruleID] = chunkEnd
 	}
 }
+
+// OnApply is called from Manager.Apply after the group diff. Non-blocking.
+func (c *replayCoordinator) OnApply(parent context.Context, cfg Config) {
+	if c == nil {
+		return
+	}
+
+	// 1. Build inventory once per process.
+	if c.inv == nil && c.httpClient != nil {
+		inv, err := fetchInventory(c.ctx, c.httpClient)
+		if err != nil {
+			c.logger.Errorf("replay: inventory fetch failed, skipping run: %v", err)
+			return
+		}
+		c.inv = inv
+		if c.metrics != nil {
+			c.metrics.InventoryAge.Set(0)
+		}
+	}
+
+	// 2. Build dep graph + handle cycles.
+	graph, err := buildDepGraph(cfg)
+	if err != nil && err != ErrReplayCycle {
+		c.logger.Errorf("replay: build dep graph failed: %v", err)
+		return
+	}
+	if graph == nil {
+		return
+	}
+	for _, id := range graph.cycle {
+		c.logger.Errorf("replay: cycle member rule_id=%d, skipping", id)
+		c.setOutcome(id, OutcomeCycle)
+	}
+
+	// 3. Map record names + index rules by ID.
+	records := map[string]uint64{}
+	rulesByID := map[uint64]Rule{}
+	groupByRule := map[uint64]Group{}
+	for _, grp := range cfg.Groups {
+		for _, r := range grp.Rules {
+			records[r.Record] = r.ID
+			rulesByID[r.ID] = r
+			groupByRule[r.ID] = grp
+		}
+	}
+
+	// 4. Spawn runners in topo order.
+	for _, id := range graph.order {
+		if !c.markProbed(id) {
+			continue
+		}
+		grp := groupByRule[id]
+		if grp.Replay != nil && grp.Replay.Enabled != nil && !*grp.Replay.Enabled {
+			c.setOutcome(id, OutcomeSkippedNoSpan)
+			continue
+		}
+		rule := rulesByID[id]
+		minDepth, _ := maxRangeSelector(rule.Expr)
+
+		// Pre-create done chan + collect upstream chans.
+		_ = c.doneCh(id)
+		var upChs []chan struct{}
+		for _, upID := range graph.nodes[id].upstreams {
+			upChs = append(upChs, c.doneCh(upID))
+		}
+
+		runner := &replayRunner{
+			rule:      rule,
+			groupName: grp.Name,
+			groupCfg:  grp.Replay,
+			cfg:       c.cfg,
+			minDepth:  minDepth,
+			q:         c.qb.Build(QueryParams{EvaluationInterval: c.cfg.BatchInterval}),
+			writer:    c.writer,
+			coord:     c,
+			logger:    c.logger,
+			upstreams: upChs,
+			done:      c.doneCh(id),
+		}
+
+		if c.inv != nil {
+			if err := runner.validateSources(c.inv, records); err != nil {
+				c.logger.Errorf("replay: validate sources rule=%q: %v", rule.Record, err)
+				c.setOutcome(id, OutcomeSkippedNoSource)
+				continue
+			}
+		}
+
+		c.wg.Add(1)
+		c.rulesSem <- struct{}{}
+		go func(rnr *replayRunner, upIDs []uint64) {
+			defer c.wg.Done()
+			defer func() { <-c.rulesSem }()
+			if err := rnr.waitUpstreams(c.ctx, upIDs); err != nil {
+				c.logger.Infof("replay: upstream skip for rule=%q: %v", rnr.rule.Record, err)
+				c.setOutcome(rnr.rule.ID, OutcomeFailed)
+				return
+			}
+			rnr.Run(c.ctx)
+		}(runner, graph.nodes[id].upstreams)
+	}
+}
