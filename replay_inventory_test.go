@@ -92,3 +92,44 @@ func parseFloatSeconds(s string) (float64, error) {
 	_, err := fmt.Sscanf(s, "%f", &f)
 	return f, err
 }
+
+// TestProbeSourceRetention_SparseRecent guards against a regression where a
+// source with no samples in the last 5 minutes (but data further back) was
+// reported as zero retention. The multi-window bootstrap probe should keep
+// looking once the 5m probe comes back empty.
+func TestProbeSourceRetention_SparseRecent(t *testing.T) {
+	now := time.Now()
+	recentEmptyCutoff := now.Add(-30 * time.Minute) // anything newer than this is empty
+	oldestData := now.Add(-14 * 24 * time.Hour)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		timeStr := r.URL.Query().Get("time")
+		var queryAt time.Time
+		if timeStr != "" {
+			sec, _ := parseFloatSeconds(timeStr)
+			queryAt = time.Unix(int64(sec), 0)
+		}
+		empty := queryAt.After(recentEmptyCutoff) || queryAt.Before(oldestData)
+		var body string
+		if empty {
+			body = `{"status":"success","data":{"resultType":"scalar","result":[0,"0"]}}`
+		} else {
+			body = `{"status":"success","data":{"resultType":"scalar","result":[0,"42"]}}`
+		}
+		_, _ = w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	client, _ := NewHTTPClient(HTTPConfig{URL: srv.URL, Timeout: time.Second})
+	q := client.Build(QueryParams{})
+	got, err := probeSourceRetention(t.Context(), q, "foo", 30*24*time.Hour, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == 0 {
+		t.Fatalf("retention = 0, want non-zero despite empty recent window")
+	}
+	wantMin := 12 * 24 * time.Hour
+	wantMax := 16 * 24 * time.Hour
+	if got < wantMin || got > wantMax {
+		t.Errorf("retention = %v, want roughly 14d (between %v and %v)", got, wantMin, wantMax)
+	}
+}

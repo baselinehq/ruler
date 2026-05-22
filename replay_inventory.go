@@ -92,9 +92,24 @@ func probeSourceRetention(ctx context.Context, q Querier, sourceMetric string, m
 		return false, nil
 	}
 
-	// Establish an upper bound: any data within last 5m? If not, no retention.
-	if ok, err := probeAt(5 * time.Minute); err != nil || !ok {
-		return 0, err
+	// Establish an upper bound: probe at a few increasing windows so a sparse
+	// or low-frequency source isn't mistaken for zero retention. Any non-nil
+	// error returns immediately; only return 0 retention when ALL bootstrap
+	// probes are empty.
+	bootstrap := []time.Duration{5 * time.Minute, time.Hour, 24 * time.Hour}
+	anyData := false
+	for _, d := range bootstrap {
+		ok, err := probeAt(d)
+		if err != nil {
+			return 0, err
+		}
+		if ok {
+			anyData = true
+			break
+		}
+	}
+	if !anyData {
+		return 0, nil
 	}
 
 	// Halving search between [0, maxProbe].
