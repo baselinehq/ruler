@@ -153,12 +153,14 @@ func (m *Manager) Apply(cfg Config) error {
 }
 
 // Stop stops all groups managed by the manager.
+// Holding m.mu while draining the coordinator serializes Apply (which spawns
+// the replay goroutine under m.mu) with Stop, avoiding a WaitGroup Add/Wait race.
 func (m *Manager) Stop() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.replay != nil {
 		m.replay.Stop()
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	for id, g := range m.groups {
 		g.Stop()
 		delete(m.groups, id)
