@@ -163,6 +163,46 @@ func indexOf(s []uint64, target uint64) int {
 	return -1
 }
 
+func TestMaxRangeSelector_RateOnly(t *testing.T) {
+	got, err := maxRangeSelector(`rate(foo[5m])`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 5*time.Minute {
+		t.Errorf("got %v, want 5m", got)
+	}
+}
+
+func TestMaxRangeSelector_Subquery(t *testing.T) {
+	got, err := maxRangeSelector(`avg_over_time(foo[7d:5m])`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 7*24*time.Hour {
+		t.Errorf("got %v, want 7d", got)
+	}
+}
+
+func TestMaxRangeSelector_PicksMax(t *testing.T) {
+	got, err := maxRangeSelector(`rate(foo[5m]) + avg_over_time(bar[30d:5m])`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 30*24*time.Hour {
+		t.Errorf("got %v, want 30d", got)
+	}
+}
+
+func TestMaxRangeSelector_VectorOnly(t *testing.T) {
+	got, err := maxRangeSelector(`up`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 0 {
+		t.Errorf("got %v, want 0", got)
+	}
+}
+
 func equalSorted(got, want []string) bool {
 	if len(got) != len(want) {
 		return false

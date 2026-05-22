@@ -3,6 +3,7 @@ package ruler
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/prometheus/prometheus/promql/parser"
 )
@@ -62,6 +63,31 @@ func buildDepGraph(cfg Config) (*depGraph, error) {
 		return g, ErrReplayCycle
 	}
 	return g, nil
+}
+
+// maxRangeSelector returns the maximum range selector duration found in expr,
+// considering both MatrixSelector windows and SubqueryExpr ranges. Returns
+// 0 for expressions with no range selectors.
+func maxRangeSelector(expr string) (time.Duration, error) {
+	tree, err := parser.ParseExpr(expr)
+	if err != nil {
+		return 0, fmt.Errorf("parse expr: %w", err)
+	}
+	var maxDur time.Duration
+	parser.Inspect(tree, func(node parser.Node, _ []parser.Node) error {
+		switch n := node.(type) {
+		case *parser.MatrixSelector:
+			if n.Range > maxDur {
+				maxDur = n.Range
+			}
+		case *parser.SubqueryExpr:
+			if n.Range > maxDur {
+				maxDur = n.Range
+			}
+		}
+		return nil
+	})
+	return maxDur, nil
 }
 
 func kahnTopoSort(nodes map[uint64]*depNode) (order, cycle []uint64) {
