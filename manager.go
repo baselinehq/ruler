@@ -146,7 +146,7 @@ func (m *Manager) Apply(cfg Config) error {
 	}
 
 	if m.replay != nil {
-		go m.replay.OnApply(m.ctx, cfg)
+		m.replay.applyAsync(m.ctx, cfg)
 	}
 
 	return nil

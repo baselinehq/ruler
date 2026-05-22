@@ -71,6 +71,18 @@ func (c *replayCoordinator) Stop() {
 	c.wg.Wait()
 }
 
+// applyAsync runs OnApply on a tracked goroutine so Stop waits for it.
+func (c *replayCoordinator) applyAsync(parent context.Context, cfg Config) {
+	if c == nil {
+		return
+	}
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		c.OnApply(parent, cfg)
+	}()
+}
+
 // setOutcome stores terminal outcome + closes the rule's done channel (idempotent).
 // Ensures the channel exists even when no downstream has called doneCh yet so a
 // later cascade-skip cannot block forever on a freshly-created (unclosed) channel.
