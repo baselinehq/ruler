@@ -2,6 +2,7 @@ package ruler
 
 import (
 	"context"
+	"errors"
 	"sync"
 )
 
@@ -122,7 +123,7 @@ func (c *replayCoordinator) updateProgress(ruleID uint64, chunkEnd int64) {
 }
 
 // OnApply is called from Manager.Apply after the group diff. Non-blocking.
-func (c *replayCoordinator) OnApply(parent context.Context, cfg Config) {
+func (c *replayCoordinator) OnApply(_ context.Context, cfg Config) {
 	if c == nil {
 		return
 	}
@@ -142,7 +143,7 @@ func (c *replayCoordinator) OnApply(parent context.Context, cfg Config) {
 
 	// 2. Build dep graph + handle cycles.
 	graph, err := buildDepGraph(cfg)
-	if err != nil && err != ErrReplayCycle {
+	if err != nil && !errors.Is(err, ErrReplayCycle) {
 		c.logger.Errorf("replay: build dep graph failed: %v", err)
 		return
 	}
