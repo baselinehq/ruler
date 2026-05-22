@@ -18,6 +18,7 @@ type ManagerConfig struct {
 	UpdateEntriesLimit int
 	ExternalLabels     map[string]string
 	Logger             Logger
+	Replay             *ReplayConfig
 }
 
 // Manager manages recording rule groups.
@@ -35,6 +36,7 @@ type Manager struct {
 	logger             Logger
 
 	groups map[uint64]*groupRunner
+	replay *replayCoordinator
 }
 
 // NewManager creates a new rule manager.
@@ -71,8 +73,8 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 	if updateEntriesLimit == 0 {
 		updateEntriesLimit = 20
 	}
-	
-	return &Manager{
+
+	mgr := &Manager{
 		qb:                 cfg.QuerierBuilder,
 		writer:             cfg.Writer,
 		ctx:                ctx,
@@ -83,7 +85,22 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 		externalLabels:     copyStringMap(cfg.ExternalLabels),
 		logger:             ensureLogger(cfg.Logger),
 		groups:             make(map[uint64]*groupRunner),
-	}, nil
+	}
+
+	if cfg.Replay != nil {
+		coord, err := newReplayCoordinator(ctx, *cfg.Replay, cfg.QuerierBuilder, cfg.Writer, mgr.logger)
+		if err != nil {
+			return nil, fmt.Errorf("replay coordinator: %w", err)
+		}
+		if coord != nil {
+			if client, ok := cfg.QuerierBuilder.(*HTTPClient); ok {
+				coord.httpClient = client
+			}
+			mgr.replay = coord
+		}
+	}
+
+	return mgr, nil
 }
 
 // Apply updates groups with the provided configuration.
