@@ -76,6 +76,22 @@ func (r *replayRunner) validateSources(inv *metricInventory, records map[string]
 	return nil
 }
 
+// probeCoverage queries the output metric over [start, end) and returns the
+// list of gaps that need to be backfilled. When ProbeOutput is false, returns
+// a single gap covering the entire span.
+func (r *replayRunner) probeCoverage(ctx context.Context, start, end time.Time, step time.Duration) ([]timeRange, error) {
+	if !r.cfg.ProbeOutput {
+		return []timeRange{{Start: start, End: end}}, nil
+	}
+	expr := "count(" + r.rule.Record + ")"
+	probe, err := r.q.QueryRange(ctx, expr, start, end)
+	if err != nil {
+		return nil, err
+	}
+	merge := r.cfg.GapMergeWindow
+	return findGaps(probe, merge, start, end, step), nil
+}
+
 // readProgressMarker returns the latest watermark for this rule, or zero time
 // if no marker exists or feature disabled.
 func (r *replayRunner) readProgressMarker(ctx context.Context) (time.Time, error) {

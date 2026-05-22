@@ -158,4 +158,39 @@ func TestReadProgressMarker_ReturnsWatermark(t *testing.T) {
 	}
 }
 
+func TestProbeCoverage_DisabledReturnsFullSpan(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	resumeFrom := now.Add(-30 * 24 * time.Hour)
+	r := &replayRunner{cfg: ReplayConfig{ProbeOutput: false}, groupCfg: nil}
+	step := 5 * time.Minute
+	got, err := r.probeCoverage(context.Background(), resumeFrom, now, step)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %v, want one full-span gap", got)
+	}
+	if !got[0].Start.Equal(resumeFrom) || !got[0].End.Equal(now) {
+		t.Errorf("gap = %v", got[0])
+	}
+}
+
+func TestProbeCoverage_EmptyMatrixIsOneGap(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	resumeFrom := now.Add(-1 * time.Hour)
+	r := &replayRunner{
+		cfg:      ReplayConfig{ProbeOutput: true, GapMergeWindow: 0},
+		groupCfg: nil,
+		q:        &testQuerier{result: Result{}},
+		rule:     Rule{Record: "rec"},
+	}
+	got, err := r.probeCoverage(context.Background(), resumeFrom, now, 5*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Errorf("got %d gaps, want 1", len(got))
+	}
+}
+
 var _ = time.Now
