@@ -305,3 +305,23 @@ func buildRangeResponseJSON(numSeries, numSamples int) []byte {
 	buf.WriteString(`]}}`)
 	return buf.Bytes()
 }
+
+func BenchmarkReplay_FindGaps(b *testing.B) {
+	now := time.Unix(1_700_000_000, 0)
+	start := now.Add(-30 * 24 * time.Hour)
+	step := 5 * time.Minute
+	ts := []int64{}
+	vs := []float64{}
+	for t := start; t.Before(now); t = t.Add(step) {
+		if t.Unix()%600 != 0 { // sparse coverage
+			ts = append(ts, t.UnixMilli())
+			vs = append(vs, 1)
+		}
+	}
+	probe := Result{Data: []Metric{{Timestamps: ts, Values: vs}}}
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = findGaps(probe, 5*time.Minute, start, now, step)
+	}
+}
