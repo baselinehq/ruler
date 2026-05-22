@@ -124,12 +124,16 @@ type testRangeQuerier struct {
 func (q *testRangeQuerier) Build(params QueryParams) Querier { return q }
 
 func (q *testRangeQuerier) Query(ctx context.Context, query string, ts time.Time) (Result, error) {
+	// Snapshot callback + canned data under the lock, then invoke outside it so
+	// long-running or re-entrant hooks can't deadlock the fixture.
 	q.mu.Lock()
-	defer q.mu.Unlock()
-	if q.instantFunc != nil {
-		return q.instantFunc(query, ts)
+	instantFunc := q.instantFunc
+	data, ok := q.responses[query]
+	q.mu.Unlock()
+	if instantFunc != nil {
+		return instantFunc(query, ts)
 	}
-	if data, ok := q.responses[query]; ok {
+	if ok {
 		return Result{Data: data}, nil
 	}
 	return Result{}, nil
@@ -137,19 +141,27 @@ func (q *testRangeQuerier) Query(ctx context.Context, query string, ts time.Time
 
 func (q *testRangeQuerier) QueryRange(ctx context.Context, query string, start, end time.Time) (Result, error) {
 	q.mu.Lock()
-	defer q.mu.Unlock()
-	if q.rangeErr != nil {
-		return Result{}, q.rangeErr
+	rangeErr := q.rangeErr
+	probeFunc := q.probeFunc
+	data, ok := q.responses[query]
+	q.mu.Unlock()
+	if rangeErr != nil {
+		return Result{}, rangeErr
 	}
-	if q.probeFunc != nil {
-		return q.probeFunc(query, start, end)
+	if probeFunc != nil {
+		return probeFunc(query, start, end)
 	}
-	if data, ok := q.responses[query]; ok {
+	if ok {
 		out := make([]Metric, 0, len(data))
 		for _, m := range data {
+			limit := len(m.Timestamps)
+			if len(m.Values) < limit {
+				limit = len(m.Values)
+			}
 			var ts []int64
 			var vs []float64
-			for i, t := range m.Timestamps {
+			for i := 0; i < limit; i++ {
+				t := m.Timestamps[i]
 				if t >= start.UnixMilli() && t <= end.UnixMilli() {
 					ts = append(ts, t)
 					vs = append(vs, m.Values[i])
