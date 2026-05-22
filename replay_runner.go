@@ -76,6 +76,23 @@ func (r *replayRunner) validateSources(inv *metricInventory, records map[string]
 	return nil
 }
 
+// planChunks splits gaps into BatchInterval-sized sub-ranges.
+func planChunks(gaps []timeRange, batchInterval time.Duration) []timeRange {
+	var out []timeRange
+	for _, g := range gaps {
+		t := g.Start
+		for t.Before(g.End) {
+			end := t.Add(batchInterval)
+			if end.After(g.End) {
+				end = g.End
+			}
+			out = append(out, timeRange{Start: t, End: end})
+			t = end
+		}
+	}
+	return out
+}
+
 // probeCoverage queries the output metric over [start, end) and returns the
 // list of gaps that need to be backfilled. When ProbeOutput is false, returns
 // a single gap covering the entire span.

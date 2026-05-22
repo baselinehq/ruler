@@ -193,4 +193,43 @@ func TestProbeCoverage_EmptyMatrixIsOneGap(t *testing.T) {
 	}
 }
 
+func TestPlanChunks_SingleGapMultipleChunks(t *testing.T) {
+	t0 := time.Unix(0, 0)
+	gaps := []timeRange{{Start: t0, End: t0.Add(24 * time.Hour)}}
+	chunks := planChunks(gaps, 6*time.Hour)
+	if len(chunks) != 4 {
+		t.Errorf("got %d chunks, want 4", len(chunks))
+	}
+	if !chunks[0].Start.Equal(t0) || !chunks[0].End.Equal(t0.Add(6*time.Hour)) {
+		t.Errorf("chunk0 = %v", chunks[0])
+	}
+	if !chunks[3].End.Equal(t0.Add(24 * time.Hour)) {
+		t.Errorf("last chunk end = %v, want 24h", chunks[3].End)
+	}
+}
+
+func TestPlanChunks_HandlesShortTrailingChunk(t *testing.T) {
+	t0 := time.Unix(0, 0)
+	gaps := []timeRange{{Start: t0, End: t0.Add(7 * time.Hour)}}
+	chunks := planChunks(gaps, 6*time.Hour)
+	if len(chunks) != 2 {
+		t.Fatalf("got %d, want 2", len(chunks))
+	}
+	if !chunks[1].End.Equal(t0.Add(7 * time.Hour)) {
+		t.Errorf("trailing end = %v, want 7h", chunks[1].End)
+	}
+}
+
+func TestPlanChunks_MultipleGaps(t *testing.T) {
+	t0 := time.Unix(0, 0)
+	gaps := []timeRange{
+		{Start: t0, End: t0.Add(6 * time.Hour)},
+		{Start: t0.Add(20 * time.Hour), End: t0.Add(26 * time.Hour)},
+	}
+	chunks := planChunks(gaps, 6*time.Hour)
+	if len(chunks) != 2 {
+		t.Errorf("got %d, want 2", len(chunks))
+	}
+}
+
 var _ = time.Now
