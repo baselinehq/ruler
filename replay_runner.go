@@ -316,9 +316,15 @@ func (r *replayRunner) readProgressMarker(ctx context.Context) (time.Time, error
 // If any upstream's outcome is not a success, returns a cascade-skip error
 // naming the failing upstream.
 func (r *replayRunner) waitUpstreams(ctx context.Context, upstreamIDs []uint64) error {
+	if r.coord == nil {
+		return fmt.Errorf("replayRunner.waitUpstreams: coord is nil")
+	}
+	if len(upstreamIDs) != len(r.upstreams) {
+		return fmt.Errorf("replayRunner.waitUpstreams: upstreamIDs len=%d != upstreams len=%d", len(upstreamIDs), len(r.upstreams))
+	}
 	start := time.Now()
 	defer func() {
-		if r.coord != nil && r.coord.metrics != nil {
+		if r.coord.metrics != nil {
 			r.coord.metrics.UpstreamWaitSecs.WithLabelValues(r.rule.Record).Observe(time.Since(start).Seconds())
 		}
 	}()
