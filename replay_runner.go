@@ -130,12 +130,15 @@ func (r *replayRunner) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 	var errCount int
 	var errMu sync.Mutex
+	cancelled := false
 	for _, chunk := range chunks {
 		select {
 		case <-ctx.Done():
-			r.coord.setOutcome(r.rule.ID, OutcomeCancelled)
-			return
+			cancelled = true
 		default:
+		}
+		if cancelled {
+			break
 		}
 		sem <- struct{}{}
 		wg.Add(1)
@@ -161,6 +164,10 @@ func (r *replayRunner) Run(ctx context.Context) {
 		}(chunk)
 	}
 	wg.Wait()
+	if cancelled {
+		r.coord.setOutcome(r.rule.ID, OutcomeCancelled)
+		return
+	}
 
 	if errCount == 0 {
 		r.coord.setOutcome(r.rule.ID, OutcomeCompleted)
