@@ -701,11 +701,14 @@ groups:
       - record: out
         expr: rate(foo[5m])
 `))
-	mgr, _ := NewManager(ManagerConfig{
+	mgr, err := NewManager(ManagerConfig{
 		QuerierBuilder: q, Writer: wr, Context: context.Background(),
 		EvaluationInterval: time.Hour, Logger: &testLogger{t: t},
 		Replay: &ReplayConfig{Enabled: true, DefaultSpan: time.Hour, BatchInterval: 30 * time.Minute, ChunkTimeout: time.Second, RulesConcurrency: 1, Concurrency: 1, ProbeOutput: true},
 	})
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
 	mgr.replay.httpClient = client
 	start := time.Now()
 	if err := mgr.Apply(cfg); err != nil {

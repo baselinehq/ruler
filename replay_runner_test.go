@@ -94,7 +94,10 @@ func TestWaitUpstreams_AllSuccessReturnsNil(t *testing.T) {
 	close(up1)
 	up2 := make(chan struct{})
 	close(up2)
-	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t}, nil)
+	c, err := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t}, nil)
+	if err != nil {
+		t.Fatalf("newReplayCoordinator: %v", err)
+	}
 	defer c.Stop()
 	c.setOutcome(10, OutcomeCompleted)
 	c.setOutcome(11, OutcomeCompleted)
@@ -107,12 +110,14 @@ func TestWaitUpstreams_AllSuccessReturnsNil(t *testing.T) {
 func TestWaitUpstreams_FailedUpstreamCascades(t *testing.T) {
 	up := make(chan struct{})
 	close(up)
-	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t}, nil)
+	c, err := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t}, nil)
+	if err != nil {
+		t.Fatalf("newReplayCoordinator: %v", err)
+	}
 	defer c.Stop()
 	c.setOutcome(20, OutcomeFailed)
 	r := &replayRunner{coord: c, upstreams: []chan struct{}{up}}
-	err := r.waitUpstreams(context.Background(), []uint64{20})
-	if err == nil {
+	if err := r.waitUpstreams(context.Background(), []uint64{20}); err == nil {
 		t.Fatal("want error on failed upstream")
 	}
 }
@@ -320,7 +325,7 @@ func TestRunnerRun_HappyPath(t *testing.T) {
 		Timestamps: []int64{now.Add(-2 * time.Hour).UnixMilli()},
 		Values:     []float64{1},
 	}}}}
-	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{
+	c, err := newReplayCoordinator(context.Background(), ReplayConfig{
 		Enabled:       true,
 		DefaultSpan:   1 * time.Hour,
 		BatchInterval: 30 * time.Minute,
@@ -328,6 +333,9 @@ func TestRunnerRun_HappyPath(t *testing.T) {
 		Concurrency:   1,
 		ProbeOutput:   false,
 	}, q, wr, &testLogger{t: t}, nil)
+	if err != nil {
+		t.Fatalf("newReplayCoordinator: %v", err)
+	}
 	defer c.Stop()
 	r := &replayRunner{
 		rule:   Rule{Record: "out", Expr: "rate(foo[5m])", ID: 1},

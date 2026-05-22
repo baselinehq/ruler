@@ -36,7 +36,10 @@ func TestCoordinator_MarkProbedDedup(t *testing.T) {
 }
 
 func TestCoordinator_SetOutcomeClosesDoneChan(t *testing.T) {
-	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t}, nil)
+	c, err := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t}, nil)
+	if err != nil {
+		t.Fatalf("newReplayCoordinator: %v", err)
+	}
 	defer c.Stop()
 	ch := c.doneCh(7)
 	c.setOutcome(7, OutcomeCompleted)
@@ -51,7 +54,10 @@ func TestCoordinator_SetOutcomeClosesDoneChan(t *testing.T) {
 }
 
 func TestCoordinator_SetOutcomeBeforeDoneCh_StillCascades(t *testing.T) {
-	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: time.Hour}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t}, nil)
+	c, err := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: time.Hour}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t}, nil)
+	if err != nil {
+		t.Fatalf("newReplayCoordinator: %v", err)
+	}
 	defer c.Stop()
 	c.setOutcome(42, OutcomeSkippedDisabled)
 	ch := c.doneCh(42)
@@ -63,7 +69,10 @@ func TestCoordinator_SetOutcomeBeforeDoneCh_StillCascades(t *testing.T) {
 }
 
 func TestCoordinator_UpdateProgressMonotonic(t *testing.T) {
-	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t}, nil)
+	c, err := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t}, nil)
+	if err != nil {
+		t.Fatalf("newReplayCoordinator: %v", err)
+	}
 	defer c.Stop()
 	c.updateProgress(1, 100)
 	c.updateProgress(1, 50) // older, should be ignored
