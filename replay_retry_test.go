@@ -62,8 +62,11 @@ func TestRetryChunk_CtxCancelStopsLoop(t *testing.T) {
 		attempts++
 		return io.EOF
 	})
-	if !errors.Is(err, context.Canceled) && attempts > 2 {
-		t.Errorf("attempts = %d, want few", attempts)
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+	if attempts >= 5 {
+		t.Errorf("attempts = %d, want < MaxAttempts (5)", attempts)
 	}
 }
 
