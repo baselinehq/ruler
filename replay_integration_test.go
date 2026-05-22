@@ -247,3 +247,63 @@ groups:
 		t.Error("expected at least one sample in the second half of the span")
 	}
 }
+
+func TestReplayIntegration_CycleDetectionCascade(t *testing.T) {
+	srv := invServer()
+	defer srv.Close()
+	client, _ := NewHTTPClient(HTTPConfig{URL: srv.URL, Timeout: time.Second})
+
+	q := &testRangeQuerier{}
+	wr := &testCapturingWriter{}
+
+	cfg := mustParseConfigBytes(t, []byte(`
+groups:
+  - name: g
+    interval: 30m
+    replay:
+      enabled: true
+      span: 1h
+    rules:
+      - record: A
+        expr: B
+      - record: B
+        expr: A
+      - record: C
+        expr: A
+`))
+	mgr, err := NewManager(ManagerConfig{
+		QuerierBuilder: q, Writer: wr, Context: context.Background(),
+		EvaluationInterval: time.Hour, Logger: &testLogger{t: t},
+		Replay: &ReplayConfig{
+			Enabled: true, DefaultSpan: time.Hour, BatchInterval: 30 * time.Minute,
+			ChunkTimeout: time.Second, Concurrency: 1, RulesConcurrency: 2,
+			ProbeOutput: false,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.replay.httpClient = client
+	defer mgr.Stop()
+	if err := mgr.Apply(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	idA := cfg.Groups[0].Rules[0].ID
+	idB := cfg.Groups[0].Rules[1].ID
+	idC := cfg.Groups[0].Rules[2].ID
+
+	waitOutcome(t, mgr.replay, idA, 5*time.Second)
+	waitOutcome(t, mgr.replay, idB, 5*time.Second)
+	waitOutcome(t, mgr.replay, idC, 5*time.Second)
+
+	if got := mgr.replay.outcome(idA); got != OutcomeCycle {
+		t.Errorf("outcome(A) = %v, want cycle", got)
+	}
+	if got := mgr.replay.outcome(idB); got != OutcomeCycle {
+		t.Errorf("outcome(B) = %v, want cycle", got)
+	}
+	if got := mgr.replay.outcome(idC); got == OutcomeCompleted {
+		t.Errorf("outcome(C) = %v, expected non-success (cycle cascade)", got)
+	}
+}
