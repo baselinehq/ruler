@@ -70,16 +70,21 @@ func (c *replayCoordinator) Stop() {
 }
 
 // setOutcome stores terminal outcome + closes the rule's done channel (idempotent).
+// Ensures the channel exists even when no downstream has called doneCh yet so a
+// later cascade-skip cannot block forever on a freshly-created (unclosed) channel.
 func (c *replayCoordinator) setOutcome(ruleID uint64, outcome ReplayOutcome) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.outcomes[ruleID] = outcome
-	if ch, ok := c.doneChans[ruleID]; ok {
-		select {
-		case <-ch:
-		default:
-			close(ch)
-		}
+	ch, ok := c.doneChans[ruleID]
+	if !ok {
+		ch = make(chan struct{})
+		c.doneChans[ruleID] = ch
+	}
+	select {
+	case <-ch:
+	default:
+		close(ch)
 	}
 }
 

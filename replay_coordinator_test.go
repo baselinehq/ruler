@@ -50,6 +50,18 @@ func TestCoordinator_SetOutcomeClosesDoneChan(t *testing.T) {
 	}
 }
 
+func TestCoordinator_SetOutcomeBeforeDoneCh_StillCascades(t *testing.T) {
+	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: time.Hour}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t})
+	defer c.Stop()
+	c.setOutcome(42, OutcomeSkippedDisabled)
+	ch := c.doneCh(42)
+	select {
+	case <-ch:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("done channel not closed when outcome set before doneCh creation")
+	}
+}
+
 func TestCoordinator_UpdateProgressMonotonic(t *testing.T) {
 	c, _ := newReplayCoordinator(context.Background(), ReplayConfig{Enabled: true, DefaultSpan: 1}, &testQuerier{}, &testNoopWriter{}, &testLogger{t: t})
 	defer c.Stop()
