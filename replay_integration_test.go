@@ -673,3 +673,50 @@ groups:
 		t.Errorf("outcome = %v, want pending (runner never spawned due to inventory failure)", got)
 	}
 }
+
+func TestReplayIntegration_GroupReplayDisabled(t *testing.T) {
+	srv := invServer("foo")
+	defer srv.Close()
+	client, _ := NewHTTPClient(HTTPConfig{URL: srv.URL, Timeout: time.Second})
+
+	q := &testRangeQuerier{}
+	wr := &testCapturingWriter{}
+
+	cfg := mustParseConfigBytes(t, []byte(`
+groups:
+  - name: g
+    interval: 30m
+    replay:
+      enabled: false
+    rules:
+      - record: out_metric
+        expr: rate(foo[5m])
+`))
+	mgr, err := NewManager(ManagerConfig{
+		QuerierBuilder: q, Writer: wr, Context: context.Background(),
+		EvaluationInterval: time.Hour, Logger: &testLogger{t: t},
+		Replay: &ReplayConfig{
+			Enabled: true, DefaultSpan: time.Hour, BatchInterval: 30 * time.Minute,
+			ChunkTimeout: time.Second, Concurrency: 1, RulesConcurrency: 1,
+			ProbeOutput: false,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.replay.httpClient = client
+	defer mgr.Stop()
+	if err := mgr.Apply(cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	ruleID := cfg.Groups[0].Rules[0].ID
+	waitOutcome(t, mgr.replay, ruleID, 5*time.Second)
+
+	if got := mgr.replay.outcome(ruleID); got != OutcomeSkippedNoSpan {
+		t.Errorf("outcome = %v, want skipped_no_span", got)
+	}
+	if len(wr.writes) != 0 {
+		t.Errorf("writes = %d, want 0", len(wr.writes))
+	}
+}
