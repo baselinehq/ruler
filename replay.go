@@ -190,19 +190,19 @@ func (r *replay) replayRulesSequentially(ctx context.Context, rules []*Recording
 }
 
 func (r *replay) replayRulesConcurrently(ctx context.Context, rules []*RecordingRule, ri replayRangeIterator, limit, concurrency int) (int, error) {
-	group, ctx := errgroup.WithContext(ctx)
-	group.SetLimit(concurrency)
+	eg, ctx := errgroup.WithContext(ctx)
+	eg.SetLimit(concurrency)
 
 	var total atomic.Int64
 	for _, rule := range rules {
-		group.Go(func() error {
+		eg.Go(func() error {
 			n, err := r.replayRuleRange(ctx, rule, ri, limit)
 			total.Add(int64(n))
 			return err
 		})
 	}
 
-	return int(total.Load()), group.Wait()
+	return int(total.Load()), eg.Wait()
 }
 
 func (r *replay) replayRuleRange(ctx context.Context, rule *RecordingRule, ri replayRangeIterator, limit int) (int, error) {
@@ -271,7 +271,7 @@ func (r *RecordingRule) execRange(ctx context.Context, start, end time.Time, lim
 	if err != nil {
 		return nil, fmt.Errorf("recording rule %q: %w", r.name, err)
 	}
-	
+
 	return tss, nil
 }
 
