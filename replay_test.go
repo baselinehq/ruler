@@ -110,8 +110,8 @@ func TestReplayChunksByIntervalAndMaxDatapoints(t *testing.T) {
 	}
 
 	want := []rangeCall{
-		{start: start, end: start.Add(10 * time.Minute)},
-		{start: start.Add(10 * time.Minute), end: start.Add(20 * time.Minute)},
+		{start: start, end: start.Add(9 * time.Minute)},
+		{start: start.Add(10 * time.Minute), end: start.Add(19 * time.Minute)},
 		{start: start.Add(20 * time.Minute), end: end},
 	}
 	if len(qb.ranges) != len(want) {

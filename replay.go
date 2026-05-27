@@ -154,8 +154,14 @@ func (r *replay) replayGroup(ctx context.Context, group *groupRunner, start, end
 	if int64(r.opts.MaxDatapointsPerQuery) > math.MaxInt64/int64(group.interval) {
 		return 0, fmt.Errorf("replay chunk step overflows duration")
 	}
-	step := group.interval * time.Duration(r.opts.MaxDatapointsPerQuery)
-	ri := replayRangeIterator{start: start, end: end, step: step}
+
+	chunkStep := group.interval * time.Duration(r.opts.MaxDatapointsPerQuery)
+	ri := replayRangeIterator{
+		start:      start,
+		end:        end,
+		chunkStep:  chunkStep,
+		sampleStep: group.interval,
+	}
 
 	concurrency := group.concurrency
 	if concurrency > 1 && r.opts.RulesDelay > 0 {
@@ -202,7 +208,8 @@ func (r *replay) replayRulesConcurrently(ctx context.Context, rules []*Recording
 		})
 	}
 
-	return int(total.Load()), eg.Wait()
+	err := eg.Wait()
+	return int(total.Load()), err
 }
 
 func (r *replay) replayRuleRange(ctx context.Context, rule *RecordingRule, ri replayRangeIterator, limit int) (int, error) {
@@ -276,7 +283,8 @@ func (r *RecordingRule) execRange(ctx context.Context, start, end time.Time, lim
 }
 
 type replayRangeIterator struct {
-	step       time.Duration
+	chunkStep  time.Duration
+	sampleStep time.Duration
 	start, end time.Time
 
 	iter int
@@ -284,12 +292,12 @@ type replayRangeIterator struct {
 }
 
 func (ri *replayRangeIterator) next() bool {
-	ri.s = ri.start.Add(ri.step * time.Duration(ri.iter))
-	if !ri.end.After(ri.s) {
+	ri.s = ri.start.Add(ri.chunkStep * time.Duration(ri.iter))
+	if ri.s.After(ri.end) {
 		return false
 	}
 
-	ri.e = ri.s.Add(ri.step)
+	ri.e = ri.s.Add(ri.chunkStep).Add(-ri.sampleStep)
 	if ri.e.After(ri.end) {
 		ri.e = ri.end
 	}
