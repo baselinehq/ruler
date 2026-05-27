@@ -85,22 +85,11 @@ func (r *RecordingRule) exec(ctx context.Context, ts time.Time, limit int) ([]pr
 		return nil, state.Err
 	}
 
-	// Build curEvaluation and detect duplicates WITHOUT mutating lastEvaluation
-	curEvaluation := make(map[uint64][][]prompb.Label, len(res.Data))
-	var tss []prompb.TimeSeries
-	for _, m := range res.Data {
-		ts := r.toTimeSeries(m)
-		hash := labelsHash(ts.Labels)
-
-		existing := curEvaluation[hash]
-		if labelsSetContains(existing, ts.Labels) {
-			state.Err = errDuplicateLabelset
-			r.state.add(state)
-			return nil, fmt.Errorf("recording rule %q: %w", r.name, errDuplicateLabelset)
-		}
-
-		curEvaluation[hash] = append(existing, ts.Labels)
-		tss = append(tss, ts)
+	tss, curEvaluation, err := r.toTimeSeriesSet(res.Data)
+	if err != nil {
+		state.Err = err
+		r.state.add(state)
+		return nil, fmt.Errorf("recording rule %q: %w", r.name, err)
 	}
 
 	// Compute stale series by set difference
@@ -127,6 +116,21 @@ func (r *RecordingRule) exec(ctx context.Context, ts time.Time, limit int) ([]pr
 
 	r.state.add(state)
 	return tss, nil
+}
+
+func (r *RecordingRule) toTimeSeriesSet(data []Metric) ([]prompb.TimeSeries, map[uint64][][]prompb.Label, error) {
+	seen := make(map[uint64][][]prompb.Label, len(data))
+	tss := make([]prompb.TimeSeries, 0, len(data))
+	for _, m := range data {
+		ts := r.toTimeSeries(m)
+		hash := labelsHash(ts.Labels)
+		if labelsSetContains(seen[hash], ts.Labels) {
+			return nil, nil, errDuplicateLabelset
+		}
+		seen[hash] = append(seen[hash], ts.Labels)
+		tss = append(tss, ts)
+	}
+	return tss, seen, nil
 }
 
 // sortLabels sorts labels by name using insertion sort.
@@ -352,17 +356,4 @@ func (s *ruleState) add(e StateEntry) {
 		s.next = 0
 		s.filled = true
 	}
-}
-
-func (s *ruleState) last() (StateEntry, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.filled && s.next == 0 {
-		return StateEntry{}, false
-	}
-	idx := s.next - 1
-	if idx < 0 {
-		idx = len(s.entries) - 1
-	}
-	return s.entries[idx], true
 }

@@ -6,6 +6,7 @@ require (
 	github.com/baselinehq/remote-write v0.1.1
 	github.com/prometheus/common v0.67.5
 	github.com/prometheus/prometheus v0.309.1
+	golang.org/x/sync v0.19.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

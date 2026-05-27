@@ -95,6 +95,29 @@ func main() {
 }
 ```
 
+### Example (Historical Replay)
+
+`Manager.Replay` runs a one-shot historical backfill for the same rule config. It evaluates recording rules with range queries and writes the generated samples through the configured `SeriesWriter`.
+
+```go
+opts := ruler.ReplayOptions{
+	TimeFrom:              time.Now().Add(-24 * time.Hour),
+	TimeTo:                time.Now().Add(-10 * time.Minute), // optional
+	MaxDatapointsPerQuery: 1000,
+	RuleRetryAttempts:     5,
+	RulesDelay:            time.Second,
+}
+
+if err := mgr.Replay(context.Background(), *cfg, opts); err != nil {
+	log.Fatal(err)
+}
+```
+
+- `TimeFrom` is required.
+- If `TimeTo` is unset or too recent, replay clamps it behind live evaluation to avoid racing current writes.
+- Query chunk width is `group interval * MaxDatapointsPerQuery`; PromQL step remains the group interval.
+- `RulesDelay` sleeps between rules in a group for chained recording rules.
+
 ## Configuration
 
 - **Group defaults**

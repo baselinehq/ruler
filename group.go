@@ -43,8 +43,18 @@ type groupRunner struct {
 	evalCancel context.CancelFunc
 }
 
-func newGroupRunner(cfg Group, mgr *Manager) (*groupRunner, error) {
-	interval := mgr.evaluationInterval
+type groupRunnerDeps struct {
+	qb                 QuerierBuilder
+	writer             SeriesWriter
+	logger             Logger
+	externalLabels     map[string]string
+	evaluationInterval time.Duration
+	evalDelay          time.Duration
+	updateEntriesLimit int
+}
+
+func newGroupRunner(cfg Group, deps groupRunnerDeps) (*groupRunner, error) {
+	interval := deps.evaluationInterval
 	if cfg.Interval != nil && time.Duration(*cfg.Interval) > 0 {
 		interval = time.Duration(*cfg.Interval)
 	}
@@ -57,7 +67,7 @@ func newGroupRunner(cfg Group, mgr *Manager) (*groupRunner, error) {
 		return nil, fmt.Errorf("eval_offset should be smaller than interval; now eval_offset: %v, interval: %v", time.Duration(*cfg.EvalOffset), interval)
 	}
 
-	evalDelay := mgr.evalDelay
+	evalDelay := deps.evalDelay
 	if cfg.EvalDelay != nil {
 		evalDelay = time.Duration(*cfg.EvalDelay)
 	}
@@ -88,10 +98,10 @@ func newGroupRunner(cfg Group, mgr *Manager) (*groupRunner, error) {
 		params:             params,
 		headers:            headers,
 		debug:              cfg.Debug,
-		updateEntriesLimit: mgr.updateEntriesLimit,
-		qb:                 mgr.qb,
-		writer:             mgr.writer,
-		logger:             mgr.logger,
+		updateEntriesLimit: deps.updateEntriesLimit,
+		qb:                 deps.qb,
+		writer:             deps.writer,
+		logger:             deps.logger,
 		doneCh:             make(chan struct{}),
 		updateCh:           make(chan *groupRunner, 1),
 	}
@@ -101,9 +111,9 @@ func newGroupRunner(cfg Group, mgr *Manager) (*groupRunner, error) {
 		if cfg.Rules[i].Debug != nil {
 			debug = *cfg.Rules[i].Debug
 		}
-		labels := mergeLabelSets(mgr.logger, g.name, cfg.Rules[i].Name(), mgr.externalLabels, cfg.Labels)
-		labels = mergeLabelSets(mgr.logger, g.name, cfg.Rules[i].Name(), labels, cfg.Rules[i].Labels)
-		g.rules = append(g.rules, newRecordingRule(mgr.qb, g, cfg.Rules[i], labels, debug))
+		labels := mergeLabelSets(deps.logger, g.name, cfg.Rules[i].Name(), deps.externalLabels, cfg.Labels)
+		labels = mergeLabelSets(deps.logger, g.name, cfg.Rules[i].Name(), labels, cfg.Rules[i].Labels)
+		g.rules = append(g.rules, newRecordingRule(deps.qb, g, cfg.Rules[i], labels, debug))
 	}
 
 	return g, nil
@@ -321,10 +331,7 @@ func (g *groupRunner) delayBeforeStart(ts time.Time, maxDelay time.Duration) tim
 		return currentOffsetPoint.Sub(ts)
 	}
 
-	interval := g.interval
-	if interval > maxDelay {
-		interval = maxDelay
-	}
+	interval := min(g.interval, maxDelay)
 
 	if interval <= 0 {
 		return 0
@@ -366,6 +373,7 @@ func execConcurrently(rules []*RecordingRule, concurrency int, fn func(rule *Rec
 		wg.Wait()
 		close(res)
 	}()
+
 	return res
 }
 
@@ -388,7 +396,7 @@ func durationPtr(d *model.Duration) *time.Duration {
 		return nil
 	}
 	v := time.Duration(*d)
-	
+
 	return &v
 }
 
@@ -396,6 +404,6 @@ func intOrZero(v *int) int {
 	if v == nil {
 		return 0
 	}
-	
+
 	return *v
 }

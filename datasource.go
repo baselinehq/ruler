@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"path"
@@ -137,7 +138,10 @@ func NewHTTPClient(cfg HTTPConfig) (*HTTPClient, error) {
 // Build implements QuerierBuilder.
 func (c *HTTPClient) Build(params QueryParams) Querier {
 	clone := *c
-	clone.defaultHeaders = copyStringMap(c.defaultHeaders)
+	clone.defaultHeaders = maps.Clone(c.defaultHeaders)
+	if clone.defaultHeaders == nil {
+		clone.defaultHeaders = map[string]string{}
+	}
 	clone.defaultParams = copyValues(c.defaultParams)
 	clone.evaluationInterval = params.EvaluationInterval
 	clone.debug = params.Debug
@@ -163,7 +167,7 @@ func (c *HTTPClient) Query(ctx context.Context, query string, ts time.Time) (Res
 	if err != nil {
 		return Result{}, err
 	}
-	
+
 	resp, err := c.do(req)
 	if err != nil {
 		return Result{}, err
@@ -178,12 +182,12 @@ func (c *HTTPClient) QueryRange(ctx context.Context, query string, start, end ti
 	if start.IsZero() || end.IsZero() {
 		return Result{}, fmt.Errorf("start and end must be set")
 	}
-	
+
 	req, err := c.newRangeRequest(ctx, c.queryRangeURL, query, start, end)
 	if err != nil {
 		return Result{}, err
 	}
-	
+
 	resp, err := c.do(req)
 	if err != nil {
 		return Result{}, err
@@ -239,7 +243,7 @@ func (c *HTTPClient) newRangeRequest(ctx context.Context, base *url.URL, query s
 	for k, v := range c.defaultHeaders {
 		req.Header.Set(k, v)
 	}
-	
+
 	return req, nil
 }
 
@@ -292,19 +296,6 @@ func copyValues(v url.Values) url.Values {
 	out := make(url.Values, len(v))
 	for k, vals := range v {
 		out[k] = append([]string(nil), vals...)
-	}
-
-	return out
-}
-
-func copyStringMap(m map[string]string) map[string]string {
-	if m == nil {
-		return map[string]string{}
-	}
-
-	out := make(map[string]string, len(m))
-	for k, v := range m {
-		out[k] = v
 	}
 
 	return out
@@ -523,6 +514,6 @@ func parseSeriesFetched(v *string) *int {
 	if err != nil {
 		return nil
 	}
-	
+
 	return &n
 }

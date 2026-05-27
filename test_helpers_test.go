@@ -108,3 +108,9 @@ func makeValues(n int) []float64 {
 	}
 	return vals
 }
+
+func mkRule(record, expr string) Rule {
+	r := Rule{Record: record, Expr: expr}
+	r.ID = HashRule(r)
+	return r
+}
