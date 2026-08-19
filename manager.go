@@ -3,6 +3,7 @@ package ruler
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sync"
 	"time"
 )
@@ -71,7 +72,7 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 	if updateEntriesLimit == 0 {
 		updateEntriesLimit = 20
 	}
-	
+
 	return &Manager{
 		qb:                 cfg.QuerierBuilder,
 		writer:             cfg.Writer,
@@ -80,7 +81,7 @@ func NewManager(cfg ManagerConfig) (*Manager, error) {
 		evalDelay:          evalDelay,
 		maxStartDelay:      maxStartDelay,
 		updateEntriesLimit: updateEntriesLimit,
-		externalLabels:     copyStringMap(cfg.ExternalLabels),
+		externalLabels:     maps.Clone(cfg.ExternalLabels),
 		logger:             ensureLogger(cfg.Logger),
 		groups:             make(map[uint64]*groupRunner),
 	}, nil
@@ -93,7 +94,7 @@ func (m *Manager) Apply(cfg Config) error {
 		if err := cfg.Groups[i].Validate(); err != nil {
 			return fmt.Errorf("group %q: %w", cfg.Groups[i].Name, err)
 		}
-		ng, err := newGroupRunner(cfg.Groups[i], m)
+		ng, err := newGroupRunner(cfg.Groups[i], m.groupRunnerDeps())
 		if err != nil {
 			return err
 		}
@@ -129,6 +130,39 @@ func (m *Manager) Apply(cfg Config) error {
 	}
 
 	return nil
+}
+
+// Replay evaluates the given recording rules over a historical time range
+// and writes the generated samples to remote storage. It runs once.
+func (m *Manager) Replay(ctx context.Context, cfg Config, opts ReplayOptions) error {
+	if ctx == nil {
+		ctx = m.ctx
+	}
+	for i := range cfg.Groups {
+		if err := cfg.Groups[i].Validate(); err != nil {
+			return fmt.Errorf("group %q: %w", cfg.Groups[i].Name, err)
+		}
+	}
+
+	deps := m.groupRunnerDeps()
+
+	replay, err := newReplay(opts, deps)
+	if err != nil {
+		return fmt.Errorf("replay: %w", err)
+	}
+	return replay.run(ctx, cfg)
+}
+
+func (m *Manager) groupRunnerDeps() groupRunnerDeps {
+	return groupRunnerDeps{
+		qb:                 m.qb,
+		writer:             m.writer,
+		logger:             m.logger,
+		externalLabels:     m.externalLabels,
+		evaluationInterval: m.evaluationInterval,
+		evalDelay:          m.evalDelay,
+		updateEntriesLimit: m.updateEntriesLimit,
+	}
 }
 
 // Stop stops all groups managed by the manager.

@@ -46,7 +46,7 @@ func TestUpdateWithDuringEval(t *testing.T) {
 	}
 
 	// Build the group manually
-	g, err := newGroupRunner(cfg, mgr)
+	g, err := newGroupRunner(cfg, mgr.groupRunnerDeps())
 	if err != nil {
 		t.Fatalf("failed to create group: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestUpdateWithDuringEval(t *testing.T) {
 	// Create updated group
 	cfg.Rules[0].Expr = "up{job=\"test\"}" // Modify the rule
 	cfg.Checksum = "updated"               // Force checksum change
-	newGroup, err := newGroupRunner(cfg, mgr)
+	newGroup, err := newGroupRunner(cfg, mgr.groupRunnerDeps())
 	if err != nil {
 		t.Fatalf("failed to create new group: %v", err)
 	}
@@ -126,7 +126,6 @@ func (m *mockBlockingQuerier) Query(ctx context.Context, query string, ts time.T
 func (m *mockBlockingQuerier) QueryRange(ctx context.Context, query string, start, end time.Time) (Result, error) {
 	return Result{Data: []Metric{}}, nil
 }
-
 
 // TestUpdateResetsRuleState verifies that rule updates reset per-rule state.
 // This documents the current behavior where lastEvaluation and ruleState are
@@ -224,7 +223,7 @@ func TestUpdateResetsRuleState(t *testing.T) {
 	// Create a new group with updated config (e.g., add a label)
 	cfg.Groups[0].Rules[0].Labels = map[string]string{"env": "prod"}
 	cfg.Groups[0].Checksum = "updated" // Force checksum change
-	newGroup, err := newGroupRunner(cfg.Groups[0], mgr)
+	newGroup, err := newGroupRunner(cfg.Groups[0], mgr.groupRunnerDeps())
 	if err != nil {
 		t.Fatalf("failed to create new group: %v", err)
 	}
